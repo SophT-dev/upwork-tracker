@@ -337,9 +337,9 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
 
     '<div class="upt-sec">Outcome</div>' +
     '<div class="upt-row">' +
-      sel('Viewed?', 'viewed', ['—', 'Yes', 'No'], '—') +
-      sel('Replied?', 'replied', ['—', 'Yes', 'No'], '—') +
-      sel('Closed?', 'closed', ['—', 'Yes', 'No'], '—') +
+      sel('Viewed?', 'viewed', ['No', 'Yes', '—'], 'No') +
+      sel('Replied?', 'replied', ['No', 'Yes', '—'], 'No') +
+      sel('Closed?', 'closed', ['No', 'Yes', '—'], 'No') +
     '</div>' +
     inp('Reason if not closed', 'reasonIfNot', '') +
 
