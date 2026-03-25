@@ -140,9 +140,9 @@ function doPost(e) {
     // Fields that need a default value when blank
     var DEFAULTS = {
       'invite':  'No',
-      'viewed':  '—',
-      'replied': '—',
-      'closed':  '—'
+      'viewed':  'No',
+      'replied': 'No',
+      'closed':  'No'
     };
 
     // Read the current header row to find each column's position
