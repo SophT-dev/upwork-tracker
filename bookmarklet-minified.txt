@@ -1,0 +1,66 @@
+HOW TO CREATE YOUR BOOKMARKLET
+==============================
+
+1. Paste your Web App URL into bookmarklet.js (replace PASTE_YOUR_WEB_APP_URL_HERE)
+
+2. Go to: https://www.toptal.com/developers/javascript-minifier
+   - Paste the full contents of bookmarklet.js
+   - Click "Minify JavaScript"
+   - Copy the minified output
+
+3. Create a new bookmark in your browser:
+   - Chrome: Bookmarks bar → right-click → "Add page..."
+   - Name: "Log Proposal"
+   - URL: paste this prefix first, then the minified code:
+     javascript:(function(){  ...minified code here...  })();
+
+   IMPORTANT: The entire thing must start with:  javascript:
+   and the minified code should already be wrapped in (function(){...})();
+
+4. Drag the bookmark to your bookmarks bar for easy access
+
+5. Usage:
+   - Go to any Upwork job page (before OR after submitting)
+   - Click "Log Proposal" in your bookmarks bar
+   - Panel slides in from the right with all details auto-filled
+   - Add your hook, review/edit any fields, click "Log to Sheet"
+   - Done — row appears in your Google Sheet instantly
+
+
+SHEET COLUMN HEADERS (paste these as Row 1 in your sheet)
+==========================================================
+A: Date
+B: Job Title
+C: Job Type
+D: Budget
+E: Experience Level
+F: Duration
+G: Category
+H: Skills
+I: Connects Required
+J: Proposals So Far
+K: Invite?
+L: Client Location
+M: Payment Verified
+N: Client Rating
+O: Hire Rate
+P: Client Spent
+Q: Jobs Posted
+R: Hook
+S: Proposal Sent
+T: Connects Used
+U: Boost Connects
+V: Total Connects
+W: Viewed?
+X: Replied?
+Y: Closed?
+Z: Reason if Not Closed
+AA: Source URL
+
+
+TROUBLESHOOTING
+===============
+- "Set WEB_APP_URL" error → you forgot to paste your web app URL into bookmarklet.js before minifying
+- Nothing logged → check browser console (F12) for errors; re-deploy the web app if needed
+- Fields are blank → Upwork may have updated their page layout; open an issue or manually fill the field
+- "Failed to send" → make sure the web app is deployed with "Anyone" access

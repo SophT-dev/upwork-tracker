@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Upwork Proposal Tracker",
+  "version": "1.0",
+  "description": "One-click logging of Upwork proposals to Google Sheets",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["https://www.upwork.com/*"],
+  "action": {
+    "default_title": "Log Proposal to Sheet"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}
