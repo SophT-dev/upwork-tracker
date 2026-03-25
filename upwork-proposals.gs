@@ -162,14 +162,20 @@ function doPost(e) {
     sheet.appendRow(newRow);
 
     var lastRow = sheet.getLastRow();
-    // Clip all cells so row height stays compact
+    // Clip all cells so long proposal text doesn't blow up row height
     sheet.getRange(lastRow, 1, 1, lastCol).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
-    // Wrap the Hook column so you can read the full hook text
+    // Wrap the Hook column only
     var hookCol = headers.indexOf('Hook');
     if (hookCol !== -1) {
       sheet.getRange(lastRow, hookCol + 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
     }
-    sheet.autoResizeRow(lastRow);
+    // Set row height based on hook text length — avoids autoResizeRow which
+    // ignores CLIP and expands the row to fit the full proposal text
+    var hookText = (hookCol !== -1 ? newRow[hookCol] : '') || '';
+    var hookColPx = (hookCol !== -1 ? sheet.getColumnWidth(hookCol + 1) : 200);
+    var charsPerLine = Math.max(15, Math.floor(hookColPx / 6.5));
+    var lines = Math.ceil(hookText.length / charsPerLine) || 1;
+    sheet.setRowHeight(lastRow, Math.max(21, lines * 21 + 8));
 
     return ContentService
       .createTextOutput(JSON.stringify({ status: 'ok' }))
