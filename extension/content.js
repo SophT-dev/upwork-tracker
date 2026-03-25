@@ -102,26 +102,50 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
     skills = skillsRaw.replace(/([a-z0-9])([A-Z])/g, '$1, $2').trim();
   }
 
-  var connectsRequired = fromBody(/(\d+)\s+Connects?\s+to\s+apply/i);
-
   // ── CLIENT INFO ──────────────────────────────────────────
-  // Page layout (About the client section):
-  //   [stars] 4.84 of 34 reviews
-  //   United States          ← country
-  //   Dublin 4:25            ← city + local time
-  //   Member since Dec 2020
-  //   $32.13 /hr avg
-  //   4,661 hours
-  //   Payment verified
-  //   53 jobs posted
-  //   68% hire rate
-  //   $154K total spent
+  // Two observed layouts:
+  //
+  // Layout A (company + name shown):
+  //   Client
+  //   iHousz ( Paul Jurjak )
+  //   About the client
+  //   iHousz
+  //   Romania
+  //   10:04 AM              ← time on its own line, no city
+  //
+  // Layout B (anonymous client):
+  //   About the client
+  //   4.84 of 34 reviews
+  //   United States
+  //   Dublin  5:05 AM       ← city + time on same line
 
-  // Location: Country\nCity HH:MM → format as "City, Country"
+  // Client name & company — extract from "Client\nX ( Y )" header when present
+  var clientName = '';
+  var company = '';
+  var clientHeader = fromBody(/^Client\n([^\n]+)/m);
+  if (clientHeader) {
+    var nameParenMatch = clientHeader.match(/^(.+?)\s*\(\s*(.+?)\s*\)$/);
+    if (nameParenMatch) {
+      company = nameParenMatch[1].trim();
+      clientName = nameParenMatch[2].trim();
+    } else {
+      company = clientHeader.trim();
+    }
+  }
+
+  // Location — handle both layouts:
+  // Layout B: Country\nCity  HH:MM AM/PM  → "City, Country"
+  // Layout A: Country\nHH:MM AM/PM        → "Country" only
   var clientLocation = '';
-  var locMatch = bodyText.match(/([A-Z][a-zA-Z ]+)\n([A-Z][a-zA-Z ]+)\s+\d{1,2}:\d{2}/);
-  if (locMatch) {
-    clientLocation = locMatch[2].trim() + ', ' + locMatch[1].trim();
+  // Layout B: "United States\nDublin  5:05 AM" or "United States\nDublin 5:05 AM"
+  var locMatchB = bodyText.match(/([A-Z][a-zA-Z ]+)\n([A-Z][a-zA-Z]+(?:\s[A-Z][a-zA-Z]+)?)\s+\d{1,2}:\d{2}/);
+  if (locMatchB) {
+    clientLocation = locMatchB[2].trim() + ', ' + locMatchB[1].trim();
+  }
+  if (!clientLocation) {
+    // Layout A: country on its own line immediately before a time-only line
+    var locMatchA = bodyText.match(/^([A-Z][a-zA-Z ]{2,})\n\s*\d{1,2}:\d{2}/m);
+    if (locMatchA) clientLocation = locMatchA[1].trim();
   }
   if (!clientLocation) {
     clientLocation = get(['[data-test="client-location"] strong', '[data-test="client-location"]']);
@@ -265,9 +289,12 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
       inp('Duration', 'duration', duration) +
     '</div>' +
     inp('Skills', 'skills', skills) +
-    inp('Connects Required', 'connectsReq', connectsRequired) +
 
     '<div class="upt-sec">Client Info</div>' +
+    '<div class="upt-row">' +
+      inp('Client Name', 'clientName', clientName) +
+      inp('Company', 'company', company) +
+    '</div>' +
     '<div class="upt-row">' +
       inp('Client Location', 'clientLocation', clientLocation) +
       inp('Payment Verified', 'paymentVerified', paymentVerified) +
@@ -358,7 +385,6 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
       date: v('date'), jobTitle: v('jobTitle'), category: v('category'),
       jobType: v('jobType'), budget: v('budget'), hoursPerWeek: v('hoursPerWeek'),
       experienceLevel: v('expLevel'), duration: v('duration'), skills: v('skills'),
-      connectsRequired: v('connectsReq'),
       invite: v('invite'), clientLocation: v('clientLocation'),
       paymentVerified: v('paymentVerified'), clientRating: v('clientRating'),
       hireRate: v('hireRate'), clientSpent: v('clientSpent'),
@@ -367,7 +393,8 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
       connectsUsed: v('connectsUsed'), boostConnects: v('boostConnects'),
       totalConnects: v('totalConnects'), viewed: v('viewed'),
       replied: v('replied'), closed: v('closed'),
-      reasonIfNot: v('reasonIfNot'), sourceUrl: window.location.href
+      reasonIfNot: v('reasonIfNot'), sourceUrl: window.location.href,
+      clientName: v('clientName'), company: v('company')
     };
 
     btn.disabled = true;

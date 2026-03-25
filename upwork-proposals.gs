@@ -10,6 +10,7 @@ function onOpen() {
     .addItem('Add Proposal', 'openSidebar')
     .addSeparator()
     .addItem('Setup Sheet Headers', 'setupHeaders')
+    .addItem('Add New Headers (v2 — run once)', 'addNewHeaders')
     .addToUi();
 }
 
@@ -21,15 +22,28 @@ function setupHeaders() {
     'Invite?', 'Client Location', 'Payment Verified', 'Client Rating',
     'Hire Rate', 'Client Spent', 'Jobs Posted', 'Avg Hourly Rate', 'Member Since',
     'Hook', 'Proposal Sent', 'Connects Used', 'Boost Connects', 'Total Connects',
-    'Viewed?', 'Replied?', 'Closed?', 'Reason if Not Closed', 'Source URL'
+    'Viewed?', 'Replied?', 'Closed?', 'Reason if Not Closed', 'Source URL',
+    'Client Name', 'Company'
   ];
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-  sheet.getRange(1, 1, 1, headers.length)
+  sheet.getRange(1, 1, 1, headers.length)  // 31 cols
     .setFontWeight('bold')
     .setBackground('#14a800')
     .setFontColor('#ffffff');
   sheet.setFrozenRows(1);
   SpreadsheetApp.getUi().alert('Headers set up successfully!');
+}
+
+// Run this ONCE on an existing sheet to add the two new columns without touching old data
+function addNewHeaders() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+  sheet.getRange(1, 30).setValue('Client Name');
+  sheet.getRange(1, 31).setValue('Company');
+  sheet.getRange(1, 30, 1, 2)
+    .setFontWeight('bold')
+    .setBackground('#14a800')
+    .setFontColor('#ffffff');
+  SpreadsheetApp.getUi().alert('Columns 30 (Client Name) and 31 (Company) added!');
 }
 
 function openSidebar() {
@@ -83,39 +97,42 @@ function doPost(e) {
     var data = JSON.parse(e.postData.contents);
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
     sheet.appendRow([
-      data.date            || '',
-      data.jobTitle        || '',
-      data.category        || '',
-      data.jobType         || '',
-      data.budget          || '',
-      data.hoursPerWeek    || '',
-      data.experienceLevel || '',
-      data.duration        || '',
-      data.skills          || '',
-      data.connectsRequired || '',
-      data.invite           || 'No',
-      data.clientLocation   || '',
-      data.paymentVerified  || '',
-      data.clientRating     || '',
-      data.hireRate         || '',
-      data.clientSpent      || '',
-      data.jobsPosted       || '',
-      data.avgHourlyRate    || '',
-      data.memberSince      || '',
-      data.hook             || '',
-      data.proposal        || '',
-      data.connectsUsed    || '',
-      data.boostConnects   || '',
-      data.totalConnects   || '',
-      data.viewed          || '—',
-      data.replied         || '—',
-      data.closed          || '—',
-      data.reasonIfNot     || '',
-      data.sourceUrl       || ''
+      data.date            || '',   // col 1
+      data.jobTitle        || '',   // col 2
+      data.category        || '',   // col 3
+      data.jobType         || '',   // col 4
+      data.budget          || '',   // col 5
+      data.hoursPerWeek    || '',   // col 6
+      data.experienceLevel || '',   // col 7
+      data.duration        || '',   // col 8
+      data.skills          || '',   // col 9
+      '',                           // col 10 — Connects Required (retired; kept for existing data alignment)
+      data.invite           || 'No', // col 11
+      data.clientLocation   || '',   // col 12
+      data.paymentVerified  || '',   // col 13
+      data.clientRating     || '',   // col 14
+      data.hireRate         || '',   // col 15
+      data.clientSpent      || '',   // col 16
+      data.jobsPosted       || '',   // col 17
+      data.avgHourlyRate    || '',   // col 18
+      data.memberSince      || '',   // col 19
+      data.hook             || '',   // col 20 — WRAP
+      data.proposal        || '',    // col 21
+      data.connectsUsed    || '',    // col 22
+      data.boostConnects   || '',    // col 23
+      data.totalConnects   || '',    // col 24
+      data.viewed          || '—',   // col 25
+      data.replied         || '—',   // col 26
+      data.closed          || '—',   // col 27
+      data.reasonIfNot     || '',    // col 28
+      data.sourceUrl       || '',    // col 29
+      data.clientName      || '',    // col 30 — NEW
+      data.company         || ''     // col 31 — NEW
     ]);
     var lastRow = sheet.getLastRow();
+    var totalCols = sheet.getLastColumn();
     // Clip all cells so they don't expand row height
-    sheet.getRange(lastRow, 1, 1, 29).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+    sheet.getRange(lastRow, 1, 1, totalCols).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
     // Hook is column 20 — wrap it so row height fits the hook text
     sheet.getRange(lastRow, 20).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
     sheet.autoResizeRow(lastRow);
