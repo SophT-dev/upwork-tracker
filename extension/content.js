@@ -211,7 +211,8 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
   // Client name fallback — read from proposal greeting: "Hi Paul," / "Hey Sarah!" / "Dear John."
   if (!clientName && submittedProposal) {
     // Try "Hi/Hey/Hello/Dear [Name][,!.]" — case insensitive, name can be 1–2 words
-    var greetMatch = submittedProposal.match(/(?:^|\n)\s*(?:hi|hey|hello|dear)\s+([A-Za-z]+(?:\s[A-Za-z]+)?)\s*[,!.]/i);
+    // Handles: "Hi Paul," / "Hey Jonathon👋" / "Hello Sarah!" / no trailing char needed
+    var greetMatch = submittedProposal.match(/(?:^|\n)\s*(?:hi|hey|hello|dear)\s+([A-Za-z]+(?:\s[A-Za-z]+)?)(?:[^A-Za-z]|$)/im);
     if (greetMatch) {
       var candidate = greetMatch[1].trim();
       // Skip generic greetings like "there", "team", "all"
