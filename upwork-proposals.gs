@@ -89,53 +89,88 @@ function addProposal(data) {
   ]);
 }
 
-// ── WEB APP: receives data from the bookmarklet ───────────
+// ── WEB APP: receives data from the Chrome extension ──────
 // Deploy as: Extensions → Apps Script → Deploy → New deployment
 //   Type: Web app | Execute as: Me | Who has access: Anyone
+//
+// Column order is determined by your sheet's header row — rearrange freely.
+// Add or remove columns without touching this script.
+// Just make sure your column headers match the names in FIELD_MAP below.
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
     var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
-    sheet.appendRow([
-      data.date            || '',   // col 1
-      data.jobTitle        || '',   // col 2
-      data.category        || '',   // col 3
-      data.jobType         || '',   // col 4
-      data.budget          || '',   // col 5
-      data.hoursPerWeek    || '',   // col 6
-      data.experienceLevel || '',   // col 7
-      data.duration        || '',   // col 8
-      data.skills          || '',   // col 9
-      '',                           // col 10 — Connects Required (retired; kept for existing data alignment)
-      data.invite           || 'No', // col 11
-      data.clientLocation   || '',   // col 12
-      data.paymentVerified  || '',   // col 13
-      data.clientRating     || '',   // col 14
-      data.hireRate         || '',   // col 15
-      data.clientSpent      || '',   // col 16
-      data.jobsPosted       || '',   // col 17
-      data.avgHourlyRate    || '',   // col 18
-      data.memberSince      || '',   // col 19
-      data.hook             || '',   // col 20 — WRAP
-      data.proposal        || '',    // col 21
-      data.connectsUsed    || '',    // col 22
-      data.boostConnects   || '',    // col 23
-      data.totalConnects   || '',    // col 24
-      data.viewed          || '—',   // col 25
-      data.replied         || '—',   // col 26
-      data.closed          || '—',   // col 27
-      data.reasonIfNot     || '',    // col 28
-      data.sourceUrl       || '',    // col 29
-      data.clientName      || '',    // col 30 — NEW
-      data.company         || ''     // col 31 — NEW
-    ]);
+
+    // ── Column header name → JSON key sent by the extension ──
+    // Rename a column in the sheet? Update the key on the LEFT side here.
+    var FIELD_MAP = {
+      'Date':                'date',
+      'Job Title':           'jobTitle',
+      'Category':            'category',
+      'Job Type':            'jobType',
+      'Budget':              'budget',
+      'Hours/Week':          'hoursPerWeek',
+      'Experience Level':    'experienceLevel',
+      'Duration':            'duration',
+      'Skills':              'skills',
+      'Connects Required':   'connectsRequired',
+      'Invite?':             'invite',
+      'Client Location':     'clientLocation',
+      'Payment Verified':    'paymentVerified',
+      'Client Rating':       'clientRating',
+      'Hire Rate':           'hireRate',
+      'Client Spent':        'clientSpent',
+      'Jobs Posted':         'jobsPosted',
+      'Avg Hourly Rate':     'avgHourlyRate',
+      'Member Since':        'memberSince',
+      'Hook':                'hook',
+      'Proposal Sent':       'proposal',
+      'Connects Used':       'connectsUsed',
+      'Boost Connects':      'boostConnects',
+      'Total Connects':      'totalConnects',
+      'Viewed?':             'viewed',
+      'Replied?':            'replied',
+      'Closed?':             'closed',
+      'Reason if Not Closed':'reasonIfNot',
+      'Source URL':          'sourceUrl',
+      'Client Name':         'clientName',
+      'Company':             'company'
+    };
+
+    // Fields that need a default value when blank
+    var DEFAULTS = {
+      'invite':  'No',
+      'viewed':  '—',
+      'replied': '—',
+      'closed':  '—'
+    };
+
+    // Read the current header row to find each column's position
+    var lastCol = sheet.getLastColumn();
+    var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+    // Build the new row, placing each value under the right header
+    var newRow = new Array(lastCol).fill('');
+    for (var i = 0; i < headers.length; i++) {
+      var header = headers[i];
+      var key = FIELD_MAP[header];
+      if (!key) continue;
+      var val = data[key];
+      newRow[i] = (val !== undefined && val !== null && val !== '') ? val : (DEFAULTS[key] || '');
+    }
+
+    sheet.appendRow(newRow);
+
     var lastRow = sheet.getLastRow();
-    var totalCols = sheet.getLastColumn();
-    // Clip all cells so they don't expand row height
-    sheet.getRange(lastRow, 1, 1, totalCols).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
-    // Hook is column 20 — wrap it so row height fits the hook text
-    sheet.getRange(lastRow, 20).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+    // Clip all cells so row height stays compact
+    sheet.getRange(lastRow, 1, 1, lastCol).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+    // Wrap the Hook column so you can read the full hook text
+    var hookCol = headers.indexOf('Hook');
+    if (hookCol !== -1) {
+      sheet.getRange(lastRow, hookCol + 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+    }
     sheet.autoResizeRow(lastRow);
+
     return ContentService
       .createTextOutput(JSON.stringify({ status: 'ok' }))
       .setMimeType(ContentService.MimeType.JSON);
