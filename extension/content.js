@@ -208,10 +208,17 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
     if (paras.length) hookAuto = paras[0];
   }
 
-  // Client name fallback — read from proposal greeting: "Hi Paul," / "Hey Sarah," / "Dear John,"
+  // Client name fallback — read from proposal greeting: "Hi Paul," / "Hey Sarah!" / "Dear John."
   if (!clientName && submittedProposal) {
-    var greetMatch = submittedProposal.match(/^(?:Hi|Hey|Hello|Dear)\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)?)[,!]/);
-    if (greetMatch) clientName = greetMatch[1].trim();
+    // Try "Hi/Hey/Hello/Dear [Name][,!.]" — case insensitive, name can be 1–2 words
+    var greetMatch = submittedProposal.match(/(?:^|\n)\s*(?:hi|hey|hello|dear)\s+([A-Za-z]+(?:\s[A-Za-z]+)?)\s*[,!.]/i);
+    if (greetMatch) {
+      var candidate = greetMatch[1].trim();
+      // Skip generic greetings like "there", "team", "all"
+      if (!/^(there|team|all|sir|madam)$/i.test(candidate)) {
+        clientName = candidate;
+      }
+    }
   }
 
   // ── STYLES ──────────────────────────────────────────────
