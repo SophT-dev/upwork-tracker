@@ -163,6 +163,10 @@ function doPost(e) {
 
     var lastRow = sheet.getLastRow();
     sheet.getRange(lastRow, 1, 1, lastCol).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+    var hookCol = headers.indexOf('Hook');
+    if (hookCol !== -1) {
+      sheet.getRange(lastRow, hookCol + 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+    }
     sheet.setRowHeightsForced(lastRow, 1, 68);
 
     return ContentService
