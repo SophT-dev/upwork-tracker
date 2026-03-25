@@ -169,13 +169,7 @@ function doPost(e) {
     if (hookCol !== -1) {
       sheet.getRange(lastRow, hookCol + 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
     }
-    // Set row height based on hook text length — avoids autoResizeRow which
-    // ignores CLIP and expands the row to fit the full proposal text
-    var hookText = (hookCol !== -1 ? newRow[hookCol] : '') || '';
-    var hookColPx = (hookCol !== -1 ? sheet.getColumnWidth(hookCol + 1) : 200);
-    var charsPerLine = Math.max(15, Math.floor(hookColPx / 6.5));
-    var lines = Math.ceil(hookText.length / charsPerLine) || 1;
-    sheet.setRowHeight(lastRow, Math.max(21, lines * 21 + 8));
+    sheet.setRowHeight(lastRow, 68);
 
     return ContentService
       .createTextOutput(JSON.stringify({ status: 'ok' }))
