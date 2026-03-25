@@ -113,7 +113,12 @@ function doPost(e) {
       data.reasonIfNot     || '',
       data.sourceUrl       || ''
     ]);
-    sheet.setRowHeightsForced(sheet.getLastRow(), 1, 21);
+    var lastRow = sheet.getLastRow();
+    // Clip all cells so they don't expand row height
+    sheet.getRange(lastRow, 1, 1, 29).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+    // Hook is column 20 — wrap it so row height fits the hook text
+    sheet.getRange(lastRow, 20).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+    sheet.autoResizeRow(lastRow);
     return ContentService
       .createTextOutput(JSON.stringify({ status: 'ok' }))
       .setMimeType(ContentService.MimeType.JSON);
