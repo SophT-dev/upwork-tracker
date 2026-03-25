@@ -163,7 +163,7 @@ function doPost(e) {
 
     var lastRow = sheet.getLastRow();
     sheet.getRange(lastRow, 1, 1, lastCol).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
-    sheet.setRowHeight(lastRow, 68);
+    sheet.setRowHeightsForced(lastRow, 1, 68);
 
     return ContentService
       .createTextOutput(JSON.stringify({ status: 'ok' }))
