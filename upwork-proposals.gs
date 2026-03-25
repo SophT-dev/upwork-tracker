@@ -140,9 +140,9 @@ function doPost(e) {
     // Fields that need a default value when blank
     var DEFAULTS = {
       'invite':  'No',
-      'viewed':  'No',
-      'replied': 'No',
-      'closed':  'No'
+      'viewed':  '—',
+      'replied': '—',
+      'closed':  '—'
     };
 
     // Read the current header row to find each column's position
@@ -162,9 +162,7 @@ function doPost(e) {
     sheet.appendRow(newRow);
 
     var lastRow = sheet.getLastRow();
-    // Clip all cells so long proposal text doesn't blow up row height
     sheet.getRange(lastRow, 1, 1, lastCol).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
-    // Wrap the Hook column only
     var hookCol = headers.indexOf('Hook');
     if (hookCol !== -1) {
       sheet.getRange(lastRow, hookCol + 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
