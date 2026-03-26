@@ -675,9 +675,8 @@ function parseSections_(text) {
   function isMainHeader(line) {
     var s = line.replace(/^#{1,4}\s*/, '').replace(/\*\*/g, '').trim();
     if (!/^[0-3][\.\)]\s/.test(s)) return false;
-    // Reject numbered sentences (e.g. "1. Kill the Loom hook entirely...") — real section titles are short
-    var titlePart = s.replace(/^[0-3][\.\)]\s*/, '');
-    return titlePart.length < 60;
+    // Must start with a number 0-3 — accept any length (titles can have subtitles after a colon)
+    return true;
   }
 
   function isSubHeader(line) {
@@ -692,7 +691,7 @@ function parseSections_(text) {
     if (isMainHeader(trimmed)) {
       flushBuffer();
       if (current) sections.push(current);
-      var title = trimmed.replace(/^#{1,4}\s*/, '').replace(/\*\*/g, '').trim();
+      var title = trimmed.replace(/^#{1,4}\s*/, '').replace(/\*\*/g, '').trim().split(':')[0].trim();
       current = { title: title, reasoning: [], examples: [] };
       subSection = 'reasoning';
       return;
