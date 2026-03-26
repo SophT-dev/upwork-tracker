@@ -72,7 +72,7 @@ function addJobStatusHeader() {
   // Add dropdown validation on the entire column (rows 2 onward)
   var lastRow = Math.max(sheet.getMaxRows(), 1000);
   var rule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['—', 'Hired', 'Canceled', 'Other Hired'], true)
+    .requireValueInList(['—', 'Hired', 'Canceled', 'Other Hired', 'Still Active'], true)
     .setAllowInvalid(false)
     .build();
   sheet.getRange(2, insertCol, lastRow - 1, 1).setDataValidation(rule);
@@ -91,13 +91,14 @@ function addJobStatusValidation() {
     return;
   }
   var col = colIdx + 1;
-  var lastRow = Math.max(sheet.getMaxRows(), 1000);
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) { SpreadsheetApp.getUi().alert('No data rows found.'); return; }
   var rule = SpreadsheetApp.newDataValidation()
-    .requireValueInList(['—', 'Hired', 'Canceled', 'Other Hired'], true)
+    .requireValueInList(['—', 'Hired', 'Canceled', 'Other Hired', 'Still Active'], true)
     .setAllowInvalid(false)
     .build();
   sheet.getRange(2, col, lastRow - 1, 1).setDataValidation(rule);
-  SpreadsheetApp.getUi().alert('Dropdown added to Job Status column!');
+  SpreadsheetApp.getUi().alert('Dropdown added to ' + (lastRow - 1) + ' existing rows in Job Status column!');
 }
 
 function openSidebar() {
@@ -218,6 +219,17 @@ function doPost(e) {
     sheet.appendRow(newRow);
 
     var lastRow = sheet.getLastRow();
+
+    // Apply Job Status dropdown to the new row only
+    var jobStatusCol = headers.indexOf('Job Status');
+    if (jobStatusCol !== -1) {
+      var jsRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(['—', 'Hired', 'Canceled', 'Other Hired', 'Still Active'], true)
+        .setAllowInvalid(false)
+        .build();
+      sheet.getRange(lastRow, jobStatusCol + 1).setDataValidation(jsRule);
+    }
+
     sheet.getRange(lastRow, 1, 1, lastCol).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
     var hookCol = headers.indexOf('Hook');
     if (hookCol !== -1) {
