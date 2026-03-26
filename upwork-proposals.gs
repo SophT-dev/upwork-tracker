@@ -68,7 +68,15 @@ function addJobStatusHeader() {
     .setFontWeight('bold')
     .setBackground('#14a800')
     .setFontColor('#ffffff');
-  SpreadsheetApp.getUi().alert('Column "Job Status" inserted after "Closed?" at column ' + insertCol + '.');
+  // Add dropdown validation on the entire column (rows 2 onward)
+  var lastRow = Math.max(sheet.getMaxRows(), 1000);
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['—', 'Hired', 'Canceled', 'Other Hired'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, insertCol, lastRow - 1, 1).setDataValidation(rule);
+
+  SpreadsheetApp.getUi().alert('Column "Job Status" inserted after "Closed?" at column ' + insertCol + ' with dropdown validation.');
 }
 
 function openSidebar() {
