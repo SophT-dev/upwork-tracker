@@ -12,6 +12,7 @@ function onOpen() {
     .addItem('Setup Sheet Headers', 'setupHeaders')
     .addItem('Add New Headers (v2 — run once)', 'addNewHeaders')
     .addItem('Add Job Status Column (v3 — run once)', 'addJobStatusHeader')
+    .addItem('Fix Job Status Dropdown (run once)', 'addJobStatusValidation')
     .addSeparator()
     .addItem('📊 Refresh Dashboard', 'buildDashboard')
     .addItem('🤖 Run AI Analysis', 'analyzeWithClaude')
@@ -77,6 +78,26 @@ function addJobStatusHeader() {
   sheet.getRange(2, insertCol, lastRow - 1, 1).setDataValidation(rule);
 
   SpreadsheetApp.getUi().alert('Column "Job Status" inserted after "Closed?" at column ' + insertCol + ' with dropdown validation.');
+}
+
+// Run this to add the dropdown validation to an existing Job Status column
+function addJobStatusValidation() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var colIdx = headers.indexOf('Job Status');
+  if (colIdx === -1) {
+    SpreadsheetApp.getUi().alert('Could not find "Job Status" column. Run "Add Job Status Column" first.');
+    return;
+  }
+  var col = colIdx + 1;
+  var lastRow = Math.max(sheet.getMaxRows(), 1000);
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(['—', 'Hired', 'Canceled', 'Other Hired'], true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(2, col, lastRow - 1, 1).setDataValidation(rule);
+  SpreadsheetApp.getUi().alert('Dropdown added to Job Status column!');
 }
 
 function openSidebar() {
