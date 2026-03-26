@@ -11,6 +11,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Setup Sheet Headers', 'setupHeaders')
     .addItem('Add New Headers (v2 — run once)', 'addNewHeaders')
+    .addItem('Add Job Status Column (v3 — run once)', 'addJobStatusHeader')
     .addSeparator()
     .addItem('📊 Refresh Dashboard', 'buildDashboard')
     .addItem('🤖 Run AI Analysis', 'analyzeWithClaude')
@@ -25,7 +26,7 @@ function setupHeaders() {
     'Invite?', 'Client Location', 'Payment Verified', 'Client Rating',
     'Hire Rate', 'Client Spent', 'Jobs Posted', 'Avg Hourly Rate', 'Member Since',
     'Hook', 'Proposal Sent', 'Connects Used', 'Boost Connects', 'Total Connects',
-    'Viewed?', 'Replied?', 'Closed?', 'Reason if Not Closed', 'Source URL',
+    'Viewed?', 'Replied?', 'Closed?', 'Job Status', 'Reason if Not Closed', 'Source URL',
     'Client Name', 'Company'
   ];
   sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
@@ -47,6 +48,27 @@ function addNewHeaders() {
     .setBackground('#14a800')
     .setFontColor('#ffffff');
   SpreadsheetApp.getUi().alert('Columns 30 (Client Name) and 31 (Company) added!');
+}
+
+// Run this ONCE to insert the Job Status column after "Closed?" without touching old data.
+// Inserts a new column at position 28 (after Closed? at col 27) and shifts remaining cols right.
+function addJobStatusHeader() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var closedIdx = headers.indexOf('Closed?');
+  if (closedIdx === -1) {
+    SpreadsheetApp.getUi().alert('Could not find "Closed?" column. Make sure your header row is set up.');
+    return;
+  }
+  var insertCol = closedIdx + 2; // one column after Closed?
+  sheet.insertColumnAfter(closedIdx + 1);
+  sheet.getRange(1, insertCol).setValue('Job Status');
+  sheet.getRange(1, insertCol)
+    .setFontWeight('bold')
+    .setBackground('#14a800')
+    .setFontColor('#ffffff');
+  SpreadsheetApp.getUi().alert('Column "Job Status" inserted after "Closed?" at column ' + insertCol + '.');
 }
 
 function openSidebar() {
@@ -134,6 +156,7 @@ function doPost(e) {
       'Viewed?':             'viewed',
       'Replied?':            'replied',
       'Closed?':             'closed',
+      'Job Status':          'jobStatus',
       'Reason if Not Closed':'reasonIfNot',
       'Source URL':          'sourceUrl',
       'Client Name':         'clientName',
@@ -142,10 +165,11 @@ function doPost(e) {
 
     // Fields that need a default value when blank
     var DEFAULTS = {
-      'invite':  'No',
-      'viewed':  'No',
-      'replied': 'No',
-      'closed':  'No'
+      'invite':     'No',
+      'viewed':     'No',
+      'replied':    'No',
+      'closed':     'No',
+      'jobStatus':  '—'
     };
 
     // Read the current header row to find each column's position

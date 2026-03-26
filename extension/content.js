@@ -341,6 +341,9 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
       sel('Replied?', 'replied', ['No', 'Yes', '—'], 'No') +
       sel('Closed?', 'closed', ['No', 'Yes', '—'], 'No') +
     '</div>' +
+    '<div class="upt-row">' +
+      sel('Job Status', 'jobStatus', ['—', 'Hired', 'Canceled', 'Other Hired'], '—') +
+    '</div>' +
     inp('Reason if not closed', 'reasonIfNot', '') +
 
     '<div class="upt-btns">' +
@@ -407,7 +410,7 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
       connectsUsed: v('connectsUsed'), boostConnects: v('boostConnects'),
       totalConnects: v('totalConnects'), viewed: v('viewed'),
       replied: v('replied'), closed: v('closed'),
-      reasonIfNot: v('reasonIfNot'), sourceUrl: window.location.href,
+      jobStatus: v('jobStatus'), reasonIfNot: v('reasonIfNot'), sourceUrl: window.location.href,
       clientName: v('clientName'), company: v('company')
     };
 
