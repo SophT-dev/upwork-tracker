@@ -675,8 +675,11 @@ function parseSections_(text) {
   function isMainHeader(line) {
     var s = line.replace(/^#{1,4}\s*/, '').replace(/\*\*/g, '').trim();
     if (!/^[0-3][\.\)]\s/.test(s)) return false;
-    // Must start with a number 0-3 — accept any length (titles can have subtitles after a colon)
-    return true;
+    // Section titles are ALL CAPS (e.g. "HOOK PATTERNS THAT WORK")
+    // Numbered sentences inside sections are mixed case (e.g. "Rewrite every hook...")
+    var titlePart = s.replace(/^[0-3][\.\)]\s*/, '').split(':')[0].trim();
+    var firstWord = titlePart.split(/\s+/)[0];
+    return firstWord.length > 1 && firstWord === firstWord.toUpperCase();
   }
 
   function isSubHeader(line) {
