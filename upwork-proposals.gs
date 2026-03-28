@@ -651,77 +651,84 @@ function writeAiAnalysisSheet_(text, meta) {
 }
 
 // Parse Claude's response → [{title, reasoning:[], examples:[]}] with index 0 = KEY TAKEAWAYS
+// Uses keyword matching against known section titles — immune to Claude's formatting variations.
 function parseSections_(text) {
+  // Fixed slots: 0=KEY TAKEAWAYS, 1=HOOK PATTERNS, 2=VIEWED BUT GHOSTED, 3=TOP 3 ACTIONS
+  var SLOTS = [
+    { id: 0, title: '0. KEY TAKEAWAYS',          keywords: ['KEY TAKEAWAY'] },
+    { id: 1, title: '1. HOOK PATTERNS THAT WORK', keywords: ['HOOK PATTERN'] },
+    { id: 2, title: '2. VIEWED BUT GHOSTED',      keywords: ['VIEWED BUT GHOSTED', 'GHOSTED'] },
+    { id: 3, title: '3. TOP 3 ACTIONS',           keywords: ['TOP 3 ACTION', 'TOP THREE ACTION'] }
+  ];
+
+  var sections = [0,1,2,3].map(function(i) {
+    return { title: SLOTS[i].title, reasoning: [], examples: [] };
+  });
+
   var lines = text.split('\n');
-  var sections = [];
-  var current = null;
-  var subSection = null; // 'reasoning' | 'examples' | 'blocks' (for section 0)
+  var currentSlot = -1;
+  var subSection = 'reasoning';
   var buffer = [];
 
-  function flushBuffer() {
-    if (!current || buffer.length === 0) { buffer = []; return; }
-    var joined = buffer.join('\n').trim();
-    buffer = [];
-    if (!joined) return;
-    var cleaned = joined.replace(/\*\*/g, '').trim();
-    if (!cleaned) return;
-    if (subSection === 'examples') {
-      current.examples.push(cleaned);
-    } else {
-      current.reasoning.push(cleaned);
-    }
-  }
+  function clean(s) { return s.replace(/^#{1,4}\s*/, '').replace(/\*\*/g, '').trim(); }
 
-  function isMainHeader(line) {
-    var s = line.replace(/^#{1,4}\s*/, '').replace(/\*\*/g, '').trim();
-    if (!/^[0-3][\.\)]\s/.test(s)) return false;
-    // Section titles are ALL CAPS (e.g. "HOOK PATTERNS THAT WORK")
-    // Numbered sentences inside sections are mixed case (e.g. "Rewrite every hook...")
-    var titlePart = s.replace(/^[0-3][\.\)]\s*/, '').split(':')[0].trim();
-    var firstWord = titlePart.split(/\s+/)[0];
-    return firstWord.length > 1 && firstWord === firstWord.toUpperCase();
+  function matchSlot(line) {
+    var upper = clean(line).toUpperCase();
+    for (var i = 0; i < SLOTS.length; i++) {
+      for (var k = 0; k < SLOTS[i].keywords.length; k++) {
+        if (upper.indexOf(SLOTS[i].keywords[k]) !== -1) return i;
+      }
+    }
+    return -1;
   }
 
   function isSubHeader(line) {
-    var s = line.replace(/^#{1,4}\s*/, '').replace(/\*\*/g, '').trim().toUpperCase();
-    return s === 'REASONING:' || s === 'REASONING' || s === 'EXAMPLES:' || s === 'EXAMPLES';
+    var s = clean(line).toUpperCase().replace(/:$/, '');
+    return s === 'REASONING' || s === 'EXAMPLES';
+  }
+
+  function flushBuffer() {
+    if (currentSlot === -1 || buffer.length === 0) { buffer = []; return; }
+    var joined = buffer.join('\n').trim().replace(/\*\*/g, '');
+    buffer = [];
+    if (!joined) return;
+    if (subSection === 'examples') {
+      sections[currentSlot].examples.push(joined);
+    } else {
+      sections[currentSlot].reasoning.push(joined);
+    }
   }
 
   lines.forEach(function(line) {
     var trimmed = line.trim();
     if (/^---+$/.test(trimmed)) return;
 
-    if (isMainHeader(trimmed)) {
+    var slot = matchSlot(trimmed);
+    if (slot !== -1) {
       flushBuffer();
-      if (current) sections.push(current);
-      var title = trimmed.replace(/^#{1,4}\s*/, '').replace(/\*\*/g, '').trim().split(':')[0].trim();
-      current = { title: title, reasoning: [], examples: [] };
+      currentSlot = slot;
       subSection = 'reasoning';
       return;
     }
 
     if (isSubHeader(trimmed)) {
       flushBuffer();
-      var label = trimmed.replace(/^#{1,4}\s*/, '').replace(/\*\*/g, '').replace(':', '').trim().toUpperCase();
-      subSection = (label === 'EXAMPLES') ? 'examples' : 'reasoning';
+      subSection = clean(trimmed).toUpperCase().replace(/:$/, '') === 'EXAMPLES' ? 'examples' : 'reasoning';
       return;
     }
 
-    if (!current) return;
+    if (currentSlot === -1) return;
 
     if (trimmed === '') {
       flushBuffer();
       return;
     }
 
-    buffer.push(trimmed.replace(/^#{1,4}\s*/, ''));
+    buffer.push(clean(trimmed));
   });
 
   flushBuffer();
-  if (current) sections.push(current);
-
-  while (sections.length < 4) sections.push({ title: '—', reasoning: [], examples: [] });
-  return sections.slice(0, 4);
+  return sections;
 }
 
 
