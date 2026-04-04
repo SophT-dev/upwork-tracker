@@ -729,6 +729,26 @@ function parseSectionsV2_(text) {
 }
 
 
+// Fuzzy lookup: find a section by keyword fragments (case-insensitive)
+// e.g. findSection_(sections, 'TOP 5 ACTIONS') matches 'TOP 5 ACTIONS TO IMPLEMENT'
+function findSection_(sections, name) {
+  // Exact match first
+  if (sections[name]) return sections[name];
+
+  // Keyword-based fallback: all words in `name` must appear in the key
+  var keywords = name.split(/\s+/);
+  var keys = Object.keys(sections);
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    var allMatch = true;
+    for (var k = 0; k < keywords.length; k++) {
+      if (key.indexOf(keywords[k]) === -1) { allMatch = false; break; }
+    }
+    if (allMatch) return sections[key];
+  }
+  return null;
+}
+
 // Reusable: write one section (header + content) to the sheet, return next row
 function writeSection_(sheet, row, title, content, headerBg, headerFont, contentBg, cols) {
   // Header row
@@ -794,7 +814,7 @@ function writeAiAnalysisSheetV2_(overallSections, recentSections, meta, recentCo
 
   // ── KEY TAKEAWAYS ──
   row = writeSection_(sheet, row, 'KEY TAKEAWAYS',
-    overallSections['KEY TAKEAWAYS'],
+    findSection_(overallSections, 'KEY TAKEAWAYS'),
     '#2e7d32', '#ffffff', '#f1f8e9', COLS);
   row = writeSpacer_(sheet, row, 12);
 
@@ -809,7 +829,7 @@ function writeAiAnalysisSheetV2_(overallSections, recentSections, meta, recentCo
   ];
   for (var b = 0; b < blueSections.length; b++) {
     row = writeSection_(sheet, row, blueSections[b],
-      overallSections[blueSections[b]],
+      findSection_(overallSections, blueSections[b]),
       '#1565c0', '#ffffff', '#e3f2fd', COLS);
     row = writeSpacer_(sheet, row, 8);
   }
@@ -818,13 +838,13 @@ function writeAiAnalysisSheetV2_(overallSections, recentSections, meta, recentCo
 
   // ── THE GHOSTING PROBLEM (purple) ──
   row = writeSection_(sheet, row, 'THE GHOSTING PROBLEM',
-    overallSections['THE GHOSTING PROBLEM'],
+    findSection_(overallSections, 'THE GHOSTING PROBLEM'),
     '#7b1fa2', '#ffffff', '#f3e5f5', COLS);
   row = writeSpacer_(sheet, row, 12);
 
   // ── TOP 5 ACTIONS (red) ──
   row = writeSection_(sheet, row, 'TOP 5 ACTIONS',
-    overallSections['TOP 5 ACTIONS'],
+    findSection_(overallSections, 'TOP 5 ACTIONS'),
     '#c62828', '#ffffff', '#ffebee', COLS);
   row = writeSpacer_(sheet, row, 20);
 
@@ -850,19 +870,19 @@ function writeAiAnalysisSheetV2_(overallSections, recentSections, meta, recentCo
 
     // ── INDIVIDUAL VERDICTS (teal) ──
     row = writeSection_(sheet, row, 'INDIVIDUAL VERDICTS',
-      recentSections['INDIVIDUAL VERDICTS'],
+      findSection_(recentSections, 'INDIVIDUAL VERDICTS'),
       '#00897b', '#ffffff', '#e0f2f1', COLS);
     row = writeSpacer_(sheet, row, 8);
 
     // ── PATTERN DIAGNOSIS (teal) ──
     row = writeSection_(sheet, row, 'PATTERN DIAGNOSIS',
-      recentSections['PATTERN DIAGNOSIS'],
+      findSection_(recentSections, 'PATTERN DIAGNOSIS'),
       '#00897b', '#ffffff', '#e0f2f1', COLS);
     row = writeSpacer_(sheet, row, 8);
 
     // ── WHAT TO CHANGE NEXT WEEK (orange) ──
     row = writeSection_(sheet, row, 'WHAT TO CHANGE NEXT WEEK',
-      recentSections['WHAT TO CHANGE NEXT WEEK'],
+      findSection_(recentSections, 'WHAT TO CHANGE NEXT WEEK'),
       '#e65100', '#ffffff', '#fff3e0', COLS);
   } else {
     row = writeSpacer_(sheet, row, 6);
