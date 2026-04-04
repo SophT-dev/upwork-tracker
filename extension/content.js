@@ -102,6 +102,37 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
     skills = skillsRaw.replace(/([a-z0-9])([A-Z])/g, '$1, $2').trim();
   }
 
+  // Connects required — "Send a proposal for: 17 Connects" in the sidebar
+  var connectsRequired = fromBody(/Send a proposal for:\s*(\d+)\s*Connects/i);
+
+  // Available connects — "Available Connects: 46" in the sidebar
+  var availableConnects = fromBody(/Available Connects:\s*(\d+)/i);
+
+  // ── JOB DESCRIPTION + QUESTIONS (for proposal agent) ─────
+
+  // Job description — from div[data-test="Description"] on job listing page
+  var jobDesc = '';
+  var descEl = document.querySelector('[data-test="Description"]');
+  if (descEl) {
+    var descPs = descEl.querySelectorAll('p');
+    if (descPs.length) {
+      jobDesc = Array.from(descPs).map(function(p) { return p.innerText.trim(); }).filter(Boolean).join('\n\n');
+    }
+    if (!jobDesc) jobDesc = descEl.innerText.replace(/^Summary\s*/i, '').trim();
+  }
+
+  // Screening questions — from ol.list-styled on job listing page
+  var jobQuestions = '';
+  var qOl = document.querySelector('ol.list-styled');
+  if (qOl) {
+    var qLis = qOl.querySelectorAll('li');
+    if (qLis.length) {
+      jobQuestions = Array.from(qLis).map(function(li, i) {
+        return (i + 1) + '. ' + li.innerText.trim();
+      }).filter(Boolean).join('\n');
+    }
+  }
+
   // ── CLIENT INFO ──────────────────────────────────────────
   // Two observed layouts:
   //
@@ -198,14 +229,16 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
                || fromBody(/Connects?\s+to\s+Submit[:\s]+(\d+)/i);
   }
 
+  // Pre-fill connects used from required if not on proposal page
+  if (!connectsUsed && connectsRequired) connectsUsed = connectsRequired;
+
   var tcSum = (parseInt(connectsUsed) || 0) + (parseInt(boostConnects) || 0);
   var totalConnectsAuto = tcSum > 0 ? String(tcSum) : '';
 
-  // Hook = first paragraph of proposal
+  // Hook = first 231 characters of proposal
   var hookAuto = '';
   if (submittedProposal) {
-    var paras = submittedProposal.split(/\n\s*\n/).map(function (p) { return p.trim(); }).filter(Boolean);
-    if (paras.length) hookAuto = paras[0];
+    hookAuto = submittedProposal.trim().substring(0, 231);
   }
 
   // Client name fallback — read from proposal greeting: "Hi Paul," / "Hey Sarah!" / "Dear John."
@@ -247,6 +280,9 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
     '#upt-log:disabled{background:#aaa;cursor:default}',
     '#upt-cancel{padding:9px 14px;background:#eee;color:#333;border:none;border-radius:4px;font-size:13px;cursor:pointer}',
     '#upt-cancel:hover{background:#ddd}',
+    '#upt-generate{flex:1;padding:9px;background:#2563eb;color:#fff;border:none;border-radius:4px;font-size:13px;font-weight:700;cursor:pointer}',
+    '#upt-generate:hover{background:#1d4ed8}',
+    '#upt-generate:disabled{background:#aaa;cursor:default}',
     '#upt-status{text-align:center;margin-top:8px;font-weight:700;font-size:12px;min-height:16px}',
     '.upt-tip{background:#fffbe6;border-left:3px solid #e6b800;padding:5px 7px;margin-bottom:8px;font-size:11px;color:#665500;border-radius:2px}'
   ].join('');
@@ -303,6 +339,14 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
       inp('Duration', 'duration', duration) +
     '</div>' +
     inp('Skills', 'skills', skills) +
+    '<div class="upt-row">' +
+      inp('Connects Required', 'connectsReq', connectsRequired) +
+      inp('Available Connects', 'availConnects', availableConnects) +
+    '</div>' +
+
+    '<div class="upt-sec">Job Description (for proposal agent)</div>' +
+    ta('Description', 'description', jobDesc, 'upt-lg') +
+    ta('Screening Questions', 'questions', jobQuestions) +
 
     '<div class="upt-sec">Client Info</div>' +
     '<div class="upt-row">' +
@@ -327,7 +371,7 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
     '</div>' +
 
     '<div class="upt-sec">Your Proposal</div>' +
-    ta('Hook (first paragraph — resize to read more)', 'hook', hookAuto) +
+    ta('Hook (first 231 chars — auto-extracted)', 'hook', hookAuto) +
     ta('Full Proposal (incl. Q&A answers)', 'proposal', submittedProposal, 'upt-lg') +
     '<div class="upt-row">' +
       inp('Connects Used', 'connectsUsed', connectsUsed, 'number') +
@@ -345,6 +389,7 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
 
     '<div class="upt-btns">' +
       '<button id="upt-log">Log to Sheet</button>' +
+      '<button id="upt-generate">Generate Proposal</button>' +
       '<button id="upt-cancel">Cancel</button>' +
     '</div>' +
     '<div id="upt-status"></div>';
@@ -384,6 +429,67 @@ var WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbwFIe0-Mf7-i1njHtt38C
   overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
   document.getElementById('upt-close').addEventListener('click', close);
   document.getElementById('upt-cancel').addEventListener('click', close);
+
+  // ── GENERATE PROPOSAL (sends to proposal agent server) ──
+
+  document.getElementById('upt-generate').addEventListener('click', function () {
+    var btn = document.getElementById('upt-generate');
+    var status = document.getElementById('upt-status');
+
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    status.style.color = '#2563eb';
+    status.textContent = 'Starting proposal generation...';
+
+    // Read from the visible form fields (user can edit before sending)
+    var genTitle = v('jobTitle');
+    var desc = v('description');
+    var questions = v('questions').replace(/^\d+\.\s*/gm, '').split('\n').filter(Boolean).join('; ');
+
+    var payload = {
+      url: window.location.href,
+      title: genTitle,
+      description: desc,
+      budget: v('budget'),
+      job_type: v('jobType'),
+      client_country: v('clientLocation'),
+      rating: v('clientRating'),
+      total_spent: v('clientSpent'),
+      total_hires: '',
+      avg_hourly_rate_paid: v('avgHourlyRate'),
+      experience_level: v('expLevel'),
+      duration: v('duration'),
+      payment_verified: v('paymentVerified'),
+      connects_required: v('connectsReq'),
+      available_connects: v('availConnects'),
+      questions: questions
+    };
+
+    fetch('http://localhost:8000/jobs/from-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (resp) {
+      return resp.json().then(function (data) { return { ok: resp.ok, data: data }; });
+    }).then(function (result) {
+      if (!result.ok) {
+        status.style.color = '#c0392b';
+        status.textContent = result.data.detail || 'Error starting proposal.';
+        btn.disabled = false;
+        btn.textContent = 'Generate Proposal';
+        return;
+      }
+      status.style.color = '#14a800';
+      status.textContent = '✓ Proposal pipeline started!';
+      window.open('http://localhost:8000/review/' + result.data.job_id, '_blank');
+      setTimeout(close, 1500);
+    }).catch(function () {
+      status.style.color = '#c0392b';
+      status.textContent = 'Could not reach server. Is it running on port 8000?';
+      btn.disabled = false;
+      btn.textContent = 'Generate Proposal';
+    });
+  });
 
   document.getElementById('upt-log').addEventListener('click', function () {
     var btn = document.getElementById('upt-log');

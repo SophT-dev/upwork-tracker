@@ -16,6 +16,8 @@ function onOpen() {
     .addSeparator()
     .addItem('📊 Refresh Dashboard', 'buildDashboard')
     .addItem('🤖 Run AI Analysis', 'analyzeWithClaude')
+    .addItem('🎨 Apply Job Status Colors', 'applyJobStatusColors')
+    .addItem('⚙️ Set Recent Count', 'setRecentCount')
     .addToUi();
 }
 
@@ -98,7 +100,52 @@ function addJobStatusValidation() {
     .setAllowInvalid(false)
     .build();
   sheet.getRange(2, col, lastRow - 1, 1).setDataValidation(rule);
+  applyJobStatusColors_();
   SpreadsheetApp.getUi().alert('Dropdown added to ' + (lastRow - 1) + ' existing rows in Job Status column!');
+}
+
+// Apply conditional formatting colors to Job Status column
+function applyJobStatusColors_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+  var lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return;
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var col = headers.indexOf('Job Status');
+  if (col === -1) return;
+  col++; // 1-based
+  var range = sheet.getRange(2, col, sheet.getMaxRows() - 1, 1);
+
+  // Remove any existing conditional format rules that target this column
+  var existing = sheet.getConditionalFormatRules();
+  var kept = existing.filter(function(r) {
+    var ranges = r.getRanges();
+    for (var i = 0; i < ranges.length; i++) {
+      if (ranges[i].getColumn() === col && ranges[i].getNumColumns() === 1) return false;
+    }
+    return true;
+  });
+
+  // Add color rules: Hired=green, Other Hired=red, Canceled=blue
+  kept.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('Hired')
+    .setBackground('#d4edda').setFontColor('#155724')
+    .setRanges([range]).build());
+  kept.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('Other Hired')
+    .setBackground('#f8d7da').setFontColor('#721c24')
+    .setRanges([range]).build());
+  kept.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenTextEqualTo('Canceled')
+    .setBackground('#cce5ff').setFontColor('#004085')
+    .setRanges([range]).build());
+
+  sheet.setConditionalFormatRules(kept);
+}
+
+// Menu-callable wrapper
+function applyJobStatusColors() {
+  applyJobStatusColors_();
+  SpreadsheetApp.getActiveSpreadsheet().toast('Job Status colors applied!', '🎨 Formatting', 3);
 }
 
 function openSidebar() {
@@ -229,6 +276,7 @@ function doPost(e) {
         .build();
       sheet.getRange(lastRow, jobStatusCol + 1).setDataValidation(jsRule);
     }
+    applyJobStatusColors_();
 
     sheet.getRange(lastRow, 1, 1, lastCol).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
     var hookCol = headers.indexOf('Hook');
@@ -434,9 +482,106 @@ function buildDashboard() {
 // ANALYTICS — PHASE 2: AI Pattern Analysis via Claude
 // ============================================================
 
-function analyzeWithClaude() {
-  SpreadsheetApp.getActiveSpreadsheet().toast('Sending data to Claude...', '🤖 AI Analysis', 5);
+// Set how many recent proposals to analyze (stored in Script Properties)
+function setRecentCount() {
+  var current = PropertiesService.getScriptProperties().getProperty('RECENT_COUNT') || '10';
+  var ui = SpreadsheetApp.getUi();
+  var result = ui.prompt('Set Recent Count',
+    'How many recent proposals should the AI deep-dive analyze?\nCurrent: ' + current,
+    ui.ButtonSet.OK_CANCEL);
+  if (result.getSelectedButton() !== ui.Button.OK) return;
+  var val = parseInt(result.getResponseText());
+  if (isNaN(val) || val < 1 || val > 50) {
+    ui.alert('Please enter a number between 1 and 50.');
+    return;
+  }
+  PropertiesService.getScriptProperties().setProperty('RECENT_COUNT', String(val));
+  ui.alert('Recent count set to ' + val + '. This will take effect next time you run AI Analysis.');
+}
 
+// Serialize all proposal rows into compact pipe-delimited format for Claude
+function buildProposalDataForClaude_(rows, colIdx) {
+  var fields = [
+    'Date', 'Job Title', 'Category', 'Job Type', 'Budget', 'Hours/Week',
+    'Experience Level', 'Duration', 'Skills', 'Connects Required', 'Invite?',
+    'Boost Connects', 'Client Location', 'Payment Verified', 'Client Rating',
+    'Hire Rate', 'Client Spent', 'Jobs Posted', 'Avg Hourly Rate', 'Member Since',
+    'Hook', 'Viewed?', 'Replied?', 'Closed?', 'Job Status'
+  ];
+
+  var lines = [];
+  lines.push('Format: # | ' + fields.join(' | '));
+
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var vals = [];
+    for (var f = 0; f < fields.length; f++) {
+      var key = fields[f];
+      var idx = colIdx[key];
+      var val = (idx !== undefined) ? String(r[idx] || '').trim() : '—';
+      // Truncate hooks to 200 chars in the overall view
+      if (key === 'Hook' && val.length > 200) val = val.substring(0, 200) + '...';
+      vals.push(val);
+    }
+    lines.push('#' + (i + 1) + ' | ' + vals.join(' | '));
+  }
+  return lines.join('\n');
+}
+
+// Extract the N most recent proposals with full untruncated hook text
+function buildRecentForClaude_(rows, colIdx, count) {
+  var recent = rows.slice(-count);
+  var startNum = rows.length - recent.length + 1;
+
+  var fields = [
+    'Date', 'Job Title', 'Category', 'Job Type', 'Budget', 'Hours/Week',
+    'Experience Level', 'Duration', 'Skills', 'Connects Required', 'Invite?',
+    'Boost Connects', 'Client Location', 'Payment Verified', 'Client Rating',
+    'Hire Rate', 'Client Spent', 'Jobs Posted', 'Avg Hourly Rate', 'Member Since',
+    'Hook', 'Viewed?', 'Replied?', 'Closed?', 'Job Status'
+  ];
+
+  var lines = [];
+  for (var i = 0; i < recent.length; i++) {
+    var r = recent[i];
+    var vals = [];
+    for (var f = 0; f < fields.length; f++) {
+      var key = fields[f];
+      var idx = colIdx[key];
+      var val = (idx !== undefined) ? String(r[idx] || '').trim() : '—';
+      // Full hook text — no truncation
+      vals.push(val);
+    }
+    lines.push('#' + (startNum + i) + ' | ' + vals.join(' | '));
+  }
+  return lines.join('\n');
+}
+
+// Call Claude API and return text response (or null on failure)
+function callClaude_(key, prompt, maxTokens) {
+  var payload = {
+    model: 'claude-sonnet-4-6',
+    max_tokens: maxTokens,
+    messages: [{ role: 'user', content: prompt }]
+  };
+
+  var response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01'
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true
+  });
+
+  var result = JSON.parse(response.getContentText());
+  if (!result.content || !result.content[0]) return null;
+  return result.content[0].text;
+}
+
+function analyzeWithClaude() {
   var key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
   if (!key) {
     SpreadsheetApp.getUi().alert(
@@ -454,281 +599,280 @@ function analyzeWithClaude() {
     return;
   }
 
-  // Split into 3 groups based on outcomes
-  var today = new Date();
-  var vi = colIdx['Viewed?'], ri = colIdx['Replied?'], dateIdx = colIdx['Date'];
+  var overall = calcRates_(rows, colIdx);
+  var allData = buildProposalDataForClaude_(rows, colIdx);
 
-  var groupA = []; // replied=yes
-  var groupB = []; // viewed=yes, replied!=yes
-  var groupC = []; // viewed!=yes, sent 3+ days ago
-
-  rows.forEach(function(r) {
-    var replied = String(r[ri] || '').toLowerCase() === 'yes';
-    var viewed  = String(r[vi] || '').toLowerCase() === 'yes';
-    var daysOld = 0;
-    if (dateIdx !== undefined && r[dateIdx]) {
-      var d = new Date(r[dateIdx]);
-      daysOld = (today - d) / (1000 * 60 * 60 * 24);
-    }
-    if (replied) {
-      groupA.push(r);
-    } else if (viewed) {
-      groupB.push(r);
-    } else if (daysOld >= 3) {
-      groupC.push(r);
-    }
-  });
-
-  var hookIdx = colIdx['Hook'];
-  var catIdx  = colIdx['Category'];
-  var expIdx  = colIdx['Experience Level'];
-
-  function groupSummary(group, label) {
-    if (group.length === 0) return label + ': none\n';
-    var lines = [label + ' (' + group.length + ' proposals):'];
-    // Take up to 20 most recent
-    var sample = group.slice(-20);
-    sample.forEach(function(r) {
-      var hook = hookIdx !== undefined ? String(r[hookIdx] || '').trim() : '';
-      var cat  = catIdx  !== undefined ? String(r[catIdx]  || '') : '';
-      var exp  = expIdx  !== undefined ? String(r[expIdx]  || '') : '';
-      if (hook) {
-        var truncated = hook.length > 160 ? hook.substring(0, 160) + '...' : hook;
-        lines.push('- Hook: "' + truncated + '"' + (cat ? '  [' + cat + (exp ? ', ' + exp : '') + ']' : ''));
-      }
-    });
-    return lines.join('\n');
+  // Find date range
+  var dateIdx = colIdx['Date'];
+  var earliest = '—', latest = '—';
+  if (dateIdx !== undefined && rows.length > 0) {
+    earliest = String(rows[0][dateIdx] || '—');
+    latest = String(rows[rows.length - 1][dateIdx] || '—');
   }
 
-  var overall = calcRates_(rows, colIdx);
-  var prompt =
-'You are an expert Upwork freelancer coach. Analyze proposal performance data below and give specific, actionable insights.\n\n' +
-'OVERALL STATS\n' +
+  // ── API Call 1: Overall Portfolio Analysis ──
+  SpreadsheetApp.getActiveSpreadsheet().toast('Analyzing overall patterns... (1/2)', '🤖 AI Analysis', 30);
+
+  var prompt1 =
+'You are an elite Upwork freelance strategist. Analyze this freelancer\'s complete proposal history and deliver brutally specific, data-backed insights. No generic advice — every point must reference actual numbers or patterns from this data.\n\n' +
+'PORTFOLIO STATS\n' +
 'Total proposals: ' + overall.count + '\n' +
-'View rate: ' + pct_(overall.viewRate) + '\n' +
-'Reply rate: ' + pct_(overall.replyRate) + '\n' +
-'Close rate: ' + pct_(overall.closeRate) + '\n\n' +
-groupSummary(groupA, 'GROUP A — Got a reply (best outcome)') + '\n\n' +
-groupSummary(groupB, 'GROUP B — Viewed but no reply') + '\n\n' +
-groupSummary(groupC, 'GROUP C — Not viewed (sent 3+ days ago, no response)') + '\n\n' +
-'ANALYSIS TASKS\n' +
-'0. KEY TAKEAWAYS: Give 3-5 bullet points (starting with •) summarising the single most important things this data reveals. Each bullet max 1 sentence.\n\n' +
-'For sections 1, 2, and 3 below — split each into exactly two parts using these labels:\n' +
-'REASONING: the core insight or pattern (no examples here, just the finding)\n' +
-'EXAMPLES: specific quotes, hook excerpts, or cases from the data that prove it\n\n' +
-'1. HOOK PATTERNS THAT WORK: What specific language, framing, or opening moves appear in Group A hooks but are absent from Group C?\n' +
-'2. VIEWED BUT GHOSTED: What might explain why Group B proposals were opened but got no reply?\n' +
-'3. TOP 3 ACTIONS: 3 concrete things to do differently. Each action = one sentence.\n\n' +
-'Be direct. Only reference what this actual data shows — no generic freelancing advice.';
+'View rate: ' + pct_(overall.viewRate) + ' | Reply rate: ' + pct_(overall.replyRate) + ' | Close rate: ' + pct_(overall.closeRate) + '\n' +
+'Date range: ' + earliest + ' to ' + latest + '\n\n' +
+'FULL PROPOSAL DATA (one row per proposal):\n' +
+allData + '\n\n' +
+'Respond with EXACTLY these sections using these EXACT headers (===SECTION: NAME=== format). Under each header, give 3-6 bullet points starting with •. Every bullet must cite specific data (numbers, percentages, examples from above).\n\n' +
+'===SECTION: KEY TAKEAWAYS===\n' +
+'The 4-5 most important patterns this data reveals. Each bullet = one sharp sentence.\n\n' +
+'===SECTION: CLIENT PROFILE WINNERS VS LOSERS===\n' +
+'What client profiles get replies vs don\'t? Analyze: client rating ranges, hire rate ranges, total spend ranges, payment verified vs not, jobs posted count, member since (tenure). Which combos predict success?\n\n' +
+'===SECTION: BUDGET AND RATE PATTERNS===\n' +
+'What budget ranges and hourly rate ranges get replies? Fixed vs hourly performance? Where is the sweet spot?\n\n' +
+'===SECTION: CATEGORY AND SKILLS PERFORMANCE===\n' +
+'Which categories and skill combinations have the best/worst view and reply rates? Where should this freelancer focus?\n\n' +
+'===SECTION: CONNECT SPEND EFFECTIVENESS===\n' +
+'Boost vs no boost performance. Invite vs organic. Connects spent vs outcome. Is boosting worth it? Are invites converting?\n\n' +
+'===SECTION: HOOK PATTERNS THAT CONVERT===\n' +
+'What specific language, framing, or opening moves appear in replied proposals but not in ignored ones? Quote specific hooks.\n\n' +
+'===SECTION: LOCATION AND TIMING PATTERNS===\n' +
+'Any geographic patterns? Client locations that respond more? Day-of-week or date patterns?\n\n' +
+'===SECTION: THE GHOSTING PROBLEM===\n' +
+'Proposals that were viewed but got no reply — what do they have in common? What\'s different about them vs. replied proposals?\n\n' +
+'===SECTION: TOP 5 ACTIONS===\n' +
+'The 5 most impactful changes to make immediately based on everything above. Each action = one concrete sentence with a specific number or target.\n\n' +
+'Be ruthlessly specific. If a pattern only has 1-2 data points, say so. Never generalize beyond what the data shows.';
 
-  var payload = {
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1500,
-    messages: [{ role: 'user', content: prompt }]
-  };
-
-  var response = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
-    method: 'post',
-    contentType: 'application/json',
-    headers: {
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01'
-    },
-    payload: JSON.stringify(payload),
-    muteHttpExceptions: true
-  });
-
-  var result = JSON.parse(response.getContentText());
-  if (!result.content || !result.content[0]) {
-    SpreadsheetApp.getUi().alert('Claude API error: ' + response.getContentText());
+  var text1 = callClaude_(key, prompt1, 4000);
+  if (!text1) {
+    SpreadsheetApp.getUi().alert('Claude API error on overall analysis. Check your API key and try again.');
     return;
   }
 
-  var text = result.content[0].text;
+  // ── API Call 2: Recent N Deep Dive ──
+  var recentCount = parseInt(PropertiesService.getScriptProperties().getProperty('RECENT_COUNT') || '10');
+  var actualRecent = Math.min(recentCount, rows.length);
+
+  SpreadsheetApp.getActiveSpreadsheet().toast('Analyzing recent ' + actualRecent + ' proposals... (2/2)', '🤖 AI Analysis', 30);
+
+  var recentData = buildRecentForClaude_(rows, colIdx, actualRecent);
+
+  var prompt2 =
+'You are an elite Upwork freelance strategist. Below are the ' + actualRecent + ' most recent proposals this freelancer sent. Give specific, critical feedback on each one individually — then an overall pattern assessment.\n\n' +
+'OVERALL PORTFOLIO CONTEXT (for reference):\n' +
+'Total proposals all-time: ' + overall.count + ' | View rate: ' + pct_(overall.viewRate) + ' | Reply rate: ' + pct_(overall.replyRate) + ' | Close rate: ' + pct_(overall.closeRate) + '\n\n' +
+'THE ' + actualRecent + ' MOST RECENT PROPOSALS (full detail):\n' +
+recentData + '\n\n' +
+'Respond with EXACTLY these sections using these EXACT headers (===SECTION: NAME=== format):\n\n' +
+'===SECTION: INDIVIDUAL VERDICTS===\n' +
+'For each proposal, write exactly one line in this format:\n' +
+'• #{number} {Job Title} — {VERDICT: Strong/Weak/Risky/Smart} — {one sentence explaining why, referencing specific client data or hook choice}\n\n' +
+'===SECTION: PATTERN DIAGNOSIS===\n' +
+'3-5 bullets: What patterns do you see across these ' + actualRecent + ' specifically? Are things improving or getting worse compared to the overall portfolio? Any repeated mistakes?\n\n' +
+'===SECTION: WHAT TO CHANGE NEXT WEEK===\n' +
+'3 specific, concrete changes for the next 5-10 proposals based on what these recent ' + actualRecent + ' reveal.\n\n' +
+'Be direct. Be critical. No encouragement fluff.';
+
+  var text2 = callClaude_(key, prompt2, 2000);
+
+  // Parse both responses
+  var overallSections = parseSectionsV2_(text1);
+  var recentSections = text2 ? parseSectionsV2_(text2) : {};
+
+  // Build metadata
+  var vi = colIdx['Viewed?'], ri = colIdx['Replied?'];
+  var repliedCount = 0, viewedCount = 0, notViewedCount = 0;
+  rows.forEach(function(r) {
+    var replied = String(r[ri] || '').toLowerCase() === 'yes';
+    var viewed = String(r[vi] || '').toLowerCase() === 'yes';
+    if (replied) repliedCount++;
+    else if (viewed) viewedCount++;
+    else notViewedCount++;
+  });
   var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMM d, yyyy h:mm a');
   var meta = 'Last run: ' + ts + '  |  Based on ' + rows.length + ' proposals: ' +
-    groupA.length + ' replied, ' + groupB.length + ' viewed-no-reply, ' + groupC.length + ' not viewed';
+    repliedCount + ' replied, ' + viewedCount + ' viewed-no-reply, ' + notViewedCount + ' not viewed';
 
-  // Save to Script Properties for reference
-  PropertiesService.getScriptProperties().setProperty('AI_INSIGHTS_TEXT', text);
+  // Save to Script Properties
+  PropertiesService.getScriptProperties().setProperty('AI_INSIGHTS_TEXT', text1 + '\n\n---RECENT---\n\n' + (text2 || ''));
   PropertiesService.getScriptProperties().setProperty('AI_INSIGHTS_META', meta);
 
-  // Write to dedicated AI Analysis sheet
-  writeAiAnalysisSheet_(text, meta);
+  // Write to sheet
+  writeAiAnalysisSheetV2_(overallSections, recentSections, meta, actualRecent);
 }
 
 
-// Write AI analysis: KEY TAKEAWAYS full-width, then 3 sections x 2 sub-columns (reasoning | examples)
-function writeAiAnalysisSheet_(text, meta) {
+// Parse Claude response using ===SECTION: NAME=== delimiters
+function parseSectionsV2_(text) {
+  var sections = {};
+  var parts = text.split(/===SECTION:\s*/);
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i].trim();
+    if (!part) continue;
+
+    var endOfTitle = part.indexOf('===');
+    var title, content;
+    if (endOfTitle !== -1) {
+      title = part.substring(0, endOfTitle).trim();
+      content = part.substring(endOfTitle + 3).trim();
+    } else {
+      // Fallback: use first newline
+      var nl = part.indexOf('\n');
+      if (nl === -1) continue;
+      title = part.substring(0, nl).trim();
+      content = part.substring(nl + 1).trim();
+    }
+    // Strip markdown bold/headers
+    content = content.replace(/^#{1,4}\s*/gm, '').replace(/\*\*/g, '');
+    sections[title.toUpperCase()] = content;
+  }
+  return sections;
+}
+
+
+// Reusable: write one section (header + content) to the sheet, return next row
+function writeSection_(sheet, row, title, content, headerBg, headerFont, contentBg, cols) {
+  // Header row
+  sheet.getRange(row, 1, 1, cols).merge()
+    .setValue(title)
+    .setBackground(headerBg).setFontColor(headerFont)
+    .setFontWeight('bold').setFontSize(12)
+    .setVerticalAlignment('middle');
+  sheet.setRowHeight(row, 30);
+  row++;
+
+  // Content row
+  var text = content || '(No data for this section)';
+  sheet.getRange(row, 1, 1, cols).merge()
+    .setValue(text)
+    .setBackground(contentBg)
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP)
+    .setVerticalAlignment('top').setFontSize(11);
+  var estHeight = Math.max(50, text.split('\n').length * 22);
+  sheet.setRowHeight(row, estHeight);
+  row++;
+
+  return row;
+}
+
+// Write spacer row
+function writeSpacer_(sheet, row, height) {
+  sheet.setRowHeight(row, height || 10);
+  return row + 1;
+}
+
+
+// Full-width stacked layout for AI Analysis sheet
+function writeAiAnalysisSheetV2_(overallSections, recentSections, meta, recentCount) {
   var sheet = getOrCreateSheet_('🤖 AI Analysis');
   sheet.clearContents();
   sheet.clearFormats();
 
-  var allSections = parseSections_(text); // [0]=KEY TAKEAWAYS, [1-3]=main sections
-  var summary  = allSections[0];
-  var sections = allSections.slice(1, 4);
-  var TOTAL_COLS = 6;
-  var nextRow = 1;
+  var COLS = 8;
+  var row = 1;
 
-  // ── KEY TAKEAWAYS (spans all 6 cols) ──
-  if (summary && summary.reasoning.length > 0) {
-    sheet.getRange(nextRow, 1, 1, TOTAL_COLS).merge()
-      .setValue('KEY TAKEAWAYS')
-      .setBackground('#14a800').setFontColor('#ffffff').setFontWeight('bold').setFontSize(12);
-    sheet.setRowHeight(nextRow, 30);
-    nextRow++;
+  // Column widths (8 x 100 = 800px reading width)
+  for (var c = 1; c <= COLS; c++) sheet.setColumnWidth(c, 100);
 
-    var bulletText = summary.reasoning.join('\n');
-    sheet.getRange(nextRow, 1, 1, TOTAL_COLS).merge()
-      .setValue(bulletText)
-      .setBackground('#f0f7ee')
-      .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP)
-      .setVerticalAlignment('top').setFontSize(11);
-    sheet.setRowHeight(nextRow, Math.max(70, bulletText.split('\n').length * 22));
-    nextRow++;
-    sheet.setRowHeight(nextRow, 8); nextRow++; // spacer
+  // ── Title bar ──
+  sheet.getRange(row, 1, 1, COLS).merge()
+    .setValue('🤖 AI ANALYSIS')
+    .setBackground('#14a800').setFontColor('#ffffff')
+    .setFontWeight('bold').setFontSize(16)
+    .setVerticalAlignment('middle');
+  sheet.setRowHeight(row, 42);
+  row++;
+
+  // ── Meta row ──
+  sheet.getRange(row, 1, 1, COLS).merge()
+    .setValue(meta || '')
+    .setFontColor('#666666').setFontStyle('italic').setFontSize(10)
+    .setBackground('#f5f5f5');
+  sheet.setRowHeight(row, 24);
+  row++;
+
+  row = writeSpacer_(sheet, row, 6);
+
+  // ── KEY TAKEAWAYS ──
+  row = writeSection_(sheet, row, 'KEY TAKEAWAYS',
+    overallSections['KEY TAKEAWAYS'],
+    '#2e7d32', '#ffffff', '#f1f8e9', COLS);
+  row = writeSpacer_(sheet, row, 12);
+
+  // ── Main analysis sections (blue) ──
+  var blueSections = [
+    'CLIENT PROFILE WINNERS VS LOSERS',
+    'BUDGET AND RATE PATTERNS',
+    'CATEGORY AND SKILLS PERFORMANCE',
+    'CONNECT SPEND EFFECTIVENESS',
+    'HOOK PATTERNS THAT CONVERT',
+    'LOCATION AND TIMING PATTERNS'
+  ];
+  for (var b = 0; b < blueSections.length; b++) {
+    row = writeSection_(sheet, row, blueSections[b],
+      overallSections[blueSections[b]],
+      '#1565c0', '#ffffff', '#e3f2fd', COLS);
+    row = writeSpacer_(sheet, row, 8);
   }
 
-  // Meta row
-  sheet.getRange(nextRow, 1, 1, TOTAL_COLS).merge().setValue(meta || '')
-    .setFontColor('#666').setFontStyle('italic').setFontSize(10);
-  sheet.setRowHeight(nextRow, 20);
-  nextRow++;
+  row = writeSpacer_(sheet, row, 4);
 
-  // ── Sub-column header row: REASONING | EXAMPLES for each section ──
-  var subHeaderRow = nextRow;
-  sections.forEach(function(section, i) {
-    var baseCol = i * 2 + 1; // cols 1,3,5
-    // Section title spans both sub-columns
-    sheet.getRange(subHeaderRow, baseCol, 1, 2).merge()
-      .setValue(section.title)
-      .setBackground('#14a800').setFontColor('#ffffff').setFontWeight('bold').setFontSize(11)
-      .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
-    sheet.setRowHeight(subHeaderRow, 30);
+  // ── THE GHOSTING PROBLEM (purple) ──
+  row = writeSection_(sheet, row, 'THE GHOSTING PROBLEM',
+    overallSections['THE GHOSTING PROBLEM'],
+    '#7b1fa2', '#ffffff', '#f3e5f5', COLS);
+  row = writeSpacer_(sheet, row, 12);
 
-    // Sub-column labels
-    sheet.getRange(subHeaderRow + 1, baseCol)
-      .setValue('REASONING').setBackground('#e8f5e9').setFontWeight('bold').setFontSize(10);
-    sheet.getRange(subHeaderRow + 1, baseCol + 1)
-      .setValue('EXAMPLES').setBackground('#e8f5e9').setFontWeight('bold').setFontSize(10);
-  });
-  sheet.setRowHeight(subHeaderRow + 1, 22);
-  nextRow += 2;
+  // ── TOP 5 ACTIONS (red) ──
+  row = writeSection_(sheet, row, 'TOP 5 ACTIONS',
+    overallSections['TOP 5 ACTIONS'],
+    '#c62828', '#ffffff', '#ffebee', COLS);
+  row = writeSpacer_(sheet, row, 20);
 
-  // ── Content: write reasoning and examples row-by-row per section ──
-  // Each section has reasoning blocks and examples blocks; write them in parallel rows
-  var contentStartRow = nextRow;
-  sections.forEach(function(section, i) {
-    var baseCol = i * 2 + 1;
-    var row = contentStartRow;
+  // ═══ DIVIDER ═══
+  sheet.getRange(row, 1, 1, COLS).merge()
+    .setValue('')
+    .setBackground('#424242');
+  sheet.setRowHeight(row, 4);
+  row++;
+  row = writeSpacer_(sheet, row, 8);
 
-    section.reasoning.forEach(function(block) {
-      if (!block.trim()) return;
-      var cell = sheet.getRange(row, baseCol);
-      cell.setValue(block).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP)
-        .setVerticalAlignment('top').setFontSize(11).setBackground('#ffffff');
-      var h = Math.max(40, Math.ceil(block.length / 45) * 19);
-      if (sheet.getRowHeight(row) < h) sheet.setRowHeight(row, h);
-      row++;
-    });
+  // ── RECENT N TITLE ──
+  sheet.getRange(row, 1, 1, COLS).merge()
+    .setValue('📋 RECENT ' + recentCount + ' PROPOSALS — DEEP DIVE')
+    .setBackground('#00695c').setFontColor('#ffffff')
+    .setFontWeight('bold').setFontSize(14)
+    .setVerticalAlignment('middle');
+  sheet.setRowHeight(row, 38);
+  row++;
 
-    row = contentStartRow;
-    section.examples.forEach(function(block) {
-      if (!block.trim()) return;
-      var cell = sheet.getRange(row, baseCol + 1);
-      cell.setValue(block).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP)
-        .setVerticalAlignment('top').setFontSize(11).setBackground('#fafafa');
-      var h = Math.max(40, Math.ceil(block.length / 45) * 19);
-      if (sheet.getRowHeight(row) < h) sheet.setRowHeight(row, h);
-      row++;
-    });
-  });
+  if (recentSections && Object.keys(recentSections).length > 0) {
+    row = writeSpacer_(sheet, row, 6);
 
-  // Column widths
-  for (var c = 1; c <= TOTAL_COLS; c++) sheet.setColumnWidth(c, 210);
+    // ── INDIVIDUAL VERDICTS (teal) ──
+    row = writeSection_(sheet, row, 'INDIVIDUAL VERDICTS',
+      recentSections['INDIVIDUAL VERDICTS'],
+      '#00897b', '#ffffff', '#e0f2f1', COLS);
+    row = writeSpacer_(sheet, row, 8);
+
+    // ── PATTERN DIAGNOSIS (teal) ──
+    row = writeSection_(sheet, row, 'PATTERN DIAGNOSIS',
+      recentSections['PATTERN DIAGNOSIS'],
+      '#00897b', '#ffffff', '#e0f2f1', COLS);
+    row = writeSpacer_(sheet, row, 8);
+
+    // ── WHAT TO CHANGE NEXT WEEK (orange) ──
+    row = writeSection_(sheet, row, 'WHAT TO CHANGE NEXT WEEK',
+      recentSections['WHAT TO CHANGE NEXT WEEK'],
+      '#e65100', '#ffffff', '#fff3e0', COLS);
+  } else {
+    row = writeSpacer_(sheet, row, 6);
+    sheet.getRange(row, 1, 1, COLS).merge()
+      .setValue('⚠️ Recent analysis could not be generated. Try running again.')
+      .setFontColor('#c62828').setFontStyle('italic').setFontSize(11);
+    sheet.setRowHeight(row, 30);
+  }
 
   SpreadsheetApp.getActiveSpreadsheet().toast('Done! Check the 🤖 AI Analysis tab.', '🤖 AI Analysis', 5);
-}
-
-// Parse Claude's response → [{title, reasoning:[], examples:[]}] with index 0 = KEY TAKEAWAYS
-// Uses keyword matching against known section titles — immune to Claude's formatting variations.
-function parseSections_(text) {
-  // Fixed slots: 0=KEY TAKEAWAYS, 1=HOOK PATTERNS, 2=VIEWED BUT GHOSTED, 3=TOP 3 ACTIONS
-  var SLOTS = [
-    { id: 0, title: '0. KEY TAKEAWAYS',          keywords: ['KEY TAKEAWAY'] },
-    { id: 1, title: '1. HOOK PATTERNS THAT WORK', keywords: ['HOOK PATTERN'] },
-    { id: 2, title: '2. VIEWED BUT GHOSTED',      keywords: ['VIEWED BUT GHOSTED', 'GHOSTED'] },
-    { id: 3, title: '3. TOP 3 ACTIONS',           keywords: ['TOP 3 ACTION', 'TOP THREE ACTION'] }
-  ];
-
-  var sections = [0,1,2,3].map(function(i) {
-    return { title: SLOTS[i].title, reasoning: [], examples: [] };
-  });
-
-  var lines = text.split('\n');
-  var currentSlot = -1;
-  var subSection = 'reasoning';
-  var buffer = [];
-
-  function clean(s) { return s.replace(/^#{1,4}\s*/, '').replace(/\*\*/g, '').trim(); }
-
-  function matchSlot(line) {
-    var upper = clean(line).toUpperCase();
-    for (var i = 0; i < SLOTS.length; i++) {
-      for (var k = 0; k < SLOTS[i].keywords.length; k++) {
-        if (upper.indexOf(SLOTS[i].keywords[k]) !== -1) return i;
-      }
-    }
-    return -1;
-  }
-
-  function isSubHeader(line) {
-    var s = clean(line).toUpperCase().replace(/:$/, '');
-    return s === 'REASONING' || s === 'EXAMPLES';
-  }
-
-  function flushBuffer() {
-    if (currentSlot === -1 || buffer.length === 0) { buffer = []; return; }
-    var joined = buffer.join('\n').trim().replace(/\*\*/g, '');
-    buffer = [];
-    if (!joined) return;
-    if (subSection === 'examples') {
-      sections[currentSlot].examples.push(joined);
-    } else {
-      sections[currentSlot].reasoning.push(joined);
-    }
-  }
-
-  lines.forEach(function(line) {
-    var trimmed = line.trim();
-    if (/^---+$/.test(trimmed)) return;
-
-    var slot = matchSlot(trimmed);
-    if (slot !== -1) {
-      flushBuffer();
-      currentSlot = slot;
-      subSection = 'reasoning';
-      return;
-    }
-
-    if (isSubHeader(trimmed)) {
-      flushBuffer();
-      subSection = clean(trimmed).toUpperCase().replace(/:$/, '') === 'EXAMPLES' ? 'examples' : 'reasoning';
-      return;
-    }
-
-    if (currentSlot === -1) return;
-
-    if (trimmed === '') {
-      flushBuffer();
-      return;
-    }
-
-    buffer.push(clean(trimmed));
-  });
-
-  flushBuffer();
-  return sections;
 }
 
 
