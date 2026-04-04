@@ -382,6 +382,99 @@ function buildDashboard() {
   output.push(['Upwork Proposal Analytics', 'Updated: ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMM d, yyyy h:mm a'), '', '', '', '']);
   output.push(['', '', '', '', '', '']);
 
+  // ── ROI helper: total connects + cost metrics for a group of rows ──
+  var COST_PER_CONNECT = 0.15; // 300 connects = $45
+  var tcIdx = colIdx['Total Connects'];
+
+  function roiMetrics(subset, colIdx) {
+    var totalConnects = 0;
+    subset.forEach(function(r) {
+      totalConnects += parseFloat(r[tcIdx] || 0) || 0;
+    });
+    var totalCost = totalConnects * COST_PER_CONNECT;
+    var rates = calcRates_(subset, colIdx);
+    return {
+      count: rates.count,
+      totalConnects: totalConnects,
+      totalCost: totalCost,
+      avgConnects: rates.count > 0 ? (totalConnects / rates.count) : 0,
+      avgCost: rates.count > 0 ? (totalCost / rates.count) : 0,
+      viewed: rates.viewed,
+      replied: rates.replied,
+      closed: rates.closed,
+      costPerView: rates.viewed > 0 ? (totalCost / rates.viewed) : null,
+      costPerReply: rates.replied > 0 ? (totalCost / rates.replied) : null,
+      costPerClose: rates.closed > 0 ? (totalCost / rates.closed) : null
+    };
+  }
+
+  function dollar(val) {
+    if (val === null || val === undefined) return '—';
+    return '$' + val.toFixed(2);
+  }
+
+  // ── Section 0: CONNECT ROI ──
+  var roiAll = roiMetrics(rows, colIdx);
+
+  output.push(['CONNECT ROI', '', '', '', '', '']);
+  output.push(['Metric', 'Value', '', '', '', '']);
+  output.push(['Total Connects Spent', roiAll.totalConnects, '', '', '', '']);
+  output.push(['Total Cost', dollar(roiAll.totalCost), '', '', '', '']);
+  output.push(['Avg Connects / Proposal', roiAll.avgConnects > 0 ? roiAll.avgConnects.toFixed(1) : '—', '', '', '', '']);
+  output.push(['Avg Cost / Proposal', dollar(roiAll.avgCost), '', '', '', '']);
+  output.push(['Cost / View', dollar(roiAll.costPerView), '', '', '', '']);
+  output.push(['Cost / Reply', dollar(roiAll.costPerReply), '', '', '', '']);
+  output.push(['Cost / Close (Hire)', dollar(roiAll.costPerClose), '', '', '', '']);
+  output.push(['', '', '', '', '', '']);
+
+  // ── ROI by Category ──
+  output.push(['ROI BY CATEGORY', '', '', '', '', '']);
+  output.push(['Category', 'Proposals', 'Connects', 'Cost', '$/Reply', '$/Close']);
+  var catIdx2 = colIdx['Category'];
+  if (catIdx2 !== undefined) {
+    var catGroups = {};
+    rows.forEach(function(r) {
+      var c = r[catIdx2] || '(blank)';
+      if (!catGroups[c]) catGroups[c] = [];
+      catGroups[c].push(r);
+    });
+    var catRoiRows = Object.keys(catGroups).map(function(c) {
+      var m = roiMetrics(catGroups[c], colIdx);
+      return [c, m.count, m.totalConnects, dollar(m.totalCost), dollar(m.costPerReply), dollar(m.costPerClose)];
+    });
+    catRoiRows.sort(function(a, b) { return b[1] - a[1]; });
+    catRoiRows.forEach(function(r) { output.push(r); });
+  }
+  output.push(['', '', '', '', '', '']);
+
+  // ── ROI: Invite vs Organic ──
+  output.push(['ROI: INVITE VS ORGANIC', '', '', '', '', '']);
+  output.push(['Type', 'Proposals', 'Connects', 'Cost', '$/Reply', '$/Close']);
+  var invIdx2 = colIdx['Invite?'];
+  if (invIdx2 !== undefined) {
+    var invY = rows.filter(function(r) { return String(r[invIdx2]).toLowerCase() === 'yes'; });
+    var invN = rows.filter(function(r) { return String(r[invIdx2]).toLowerCase() !== 'yes'; });
+    var mi = roiMetrics(invY, colIdx);
+    var mo = roiMetrics(invN, colIdx);
+    output.push(['Invite', mi.count, mi.totalConnects, dollar(mi.totalCost), dollar(mi.costPerReply), dollar(mi.costPerClose)]);
+    output.push(['Organic', mo.count, mo.totalConnects, dollar(mo.totalCost), dollar(mo.costPerReply), dollar(mo.costPerClose)]);
+  }
+  output.push(['', '', '', '', '', '']);
+
+  // ── ROI: Boosted vs Not Boosted ──
+  output.push(['ROI: BOOSTED VS NOT BOOSTED', '', '', '', '', '']);
+  output.push(['Type', 'Proposals', 'Connects', 'Cost', '$/Reply', '$/Close']);
+  var boostIdx2 = colIdx['Boost Connects'];
+  if (boostIdx2 !== undefined) {
+    var bY = rows.filter(function(r) { return parseFloat(r[boostIdx2]) > 0; });
+    var bN = rows.filter(function(r) { return !(parseFloat(r[boostIdx2]) > 0); });
+    var mb = roiMetrics(bY, colIdx);
+    var mnb = roiMetrics(bN, colIdx);
+    output.push(['Boosted', mb.count, mb.totalConnects, dollar(mb.totalCost), dollar(mb.costPerReply), dollar(mb.costPerClose)]);
+    output.push(['Not Boosted', mnb.count, mnb.totalConnects, dollar(mnb.totalCost), dollar(mnb.costPerReply), dollar(mnb.costPerClose)]);
+  }
+  output.push(['', '', '', '', '', '']);
+
   // ── Section 1: Overall Funnel ──
   output.push(['OVERALL FUNNEL', '', '', '', '', '']);
   output.push(['Metric', 'Count', 'Rate', '', '', '']);
@@ -463,7 +556,7 @@ function buildDashboard() {
   var sectionRows = [];
   for (var i = 0; i < output.length; i++) {
     var cell = output[i][0];
-    if (['OVERALL FUNNEL','BY CATEGORY','INVITE VS ORGANIC','BOOSTED CONNECTS','CLIENT PAYMENT VERIFIED'].indexOf(cell) !== -1) {
+    if (['CONNECT ROI','ROI BY CATEGORY','ROI: INVITE VS ORGANIC','ROI: BOOSTED VS NOT BOOSTED','OVERALL FUNNEL','BY CATEGORY','INVITE VS ORGANIC','BOOSTED CONNECTS','CLIENT PAYMENT VERIFIED'].indexOf(cell) !== -1) {
       sectionRows.push(i + 1); // 1-based
     }
   }
