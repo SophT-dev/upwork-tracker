@@ -810,19 +810,37 @@ recentData + '\n\n' +
 }
 
 
-// Extract ~10 concise rules from analysis for the proposal agent
+// Extract hook-focused writing insights for the proposal agent.
+// Only pulls from HOOK PATTERNS and GHOSTING sections — no job filtering or strategy advice.
 function buildAgentExport_(overallSections) {
-  var takeaways = findSection_(overallSections, 'KEY TAKEAWAYS') || '';
-  var actions = findSection_(overallSections, 'TOP 5 ACTIONS') || '';
+  var hooks = findSection_(overallSections, 'HOOK PATTERNS THAT CONVERT') || '';
+  var ghosting = findSection_(overallSections, 'THE GHOSTING PROBLEM') || '';
 
-  var lines = (takeaways + '\n' + actions).split('\n')
+  // Extract bullet lines only
+  var hookLines = hooks.split('\n')
     .map(function(l) { return l.trim(); })
     .filter(function(l) { return l.indexOf('•') === 0 || l.indexOf('-') === 0; });
 
-  lines = lines.slice(0, 10);
+  var ghostLines = ghosting.split('\n')
+    .map(function(l) { return l.trim(); })
+    .filter(function(l) { return l.indexOf('•') === 0 || l.indexOf('-') === 0; });
 
   var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  var export_ = 'Updated: ' + ts + '\n' + lines.join('\n');
+  var parts = ['Updated: ' + ts];
+
+  if (hookLines.length > 0) {
+    parts.push('');
+    parts.push('HOOKS THAT GET VIEWS AND REPLIES:');
+    parts = parts.concat(hookLines.slice(0, 6));
+  }
+
+  if (ghostLines.length > 0) {
+    parts.push('');
+    parts.push('HOOKS THAT GET IGNORED OR GHOSTED:');
+    parts = parts.concat(ghostLines.slice(0, 4));
+  }
+
+  var export_ = parts.join('\n');
 
   PropertiesService.getScriptProperties().setProperty('AGENT_EXPORT', export_);
   return export_;
