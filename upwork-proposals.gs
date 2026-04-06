@@ -753,7 +753,7 @@ function analyzeWithClaude() {
   });
 
   // ── API Call 1: Overall Portfolio Analysis ──
-  SpreadsheetApp.getActiveSpreadsheet().toast('Analyzing overall patterns... (1/2)', '🤖 AI Analysis', 30);
+  SpreadsheetApp.getActiveSpreadsheet().toast('Analyzing overall patterns... (1/3)', '🤖 AI Analysis', 30);
 
   var prompt1 =
 'You are an elite Upwork freelance strategist. Analyze this freelancer\'s complete proposal history and deliver brutally specific, data-backed insights. No generic advice — every point must reference actual numbers or patterns from this data.\n\n' +
@@ -790,17 +790,6 @@ allData + '\n\n' +
 'Proposals that were viewed but got no reply — what do they have in common? What\'s different about them vs. replied proposals?\n\n' +
 '===SECTION: TOP 5 ACTIONS===\n' +
 'The 5 most impactful changes to make immediately based on everything above. Each action = one concrete sentence with a specific number or target.\n\n' +
-'===SECTION: AGENT HOOK RULES===\n' +
-'This section gets auto-fed to a proposal-writing AI agent. Output ONLY rules about how to WRITE hooks and proposals. No job selection advice. No client filtering. No connect strategy. Format:\n' +
-'DO:\n' +
-'• [specific hook writing pattern that works, with a quoted example from the data]\n' +
-'• [another pattern, with example]\n' +
-'• [another]\n' +
-'DON\'T:\n' +
-'• [specific hook pattern that gets ignored or ghosted, with a quoted example]\n' +
-'• [another, with example]\n' +
-'• [another]\n' +
-'Every rule must be about the WORDS, FRAMING, and OPENING MOVES in the proposal text itself — nothing else.\n\n' +
 'Be ruthlessly specific. If a pattern only has 1-2 data points, say so. Never generalize beyond what the data shows.';
 
   var text1 = callClaude_(key, prompt1, 8000);
@@ -813,7 +802,7 @@ allData + '\n\n' +
   var recentCount = parseInt(PropertiesService.getScriptProperties().getProperty('RECENT_COUNT') || '10');
   var actualRecent = Math.min(recentCount, rows.length);
 
-  SpreadsheetApp.getActiveSpreadsheet().toast('Analyzing recent ' + actualRecent + ' proposals... (2/2)', '🤖 AI Analysis', 30);
+  SpreadsheetApp.getActiveSpreadsheet().toast('Analyzing recent ' + actualRecent + ' proposals... (2/3)', '🤖 AI Analysis', 30);
 
   var recentData = buildRecentForClaude_(rows, colIdx, actualRecent);
 
@@ -857,22 +846,36 @@ recentData + '\n\n' +
   PropertiesService.getScriptProperties().setProperty('AI_INSIGHTS_TEXT', text1 + '\n\n---RECENT---\n\n' + (text2 || ''));
   PropertiesService.getScriptProperties().setProperty('AI_INSIGHTS_META', meta);
 
-  // Build compact agent export (max 10 rules) and store for live fetch
-  var agentExport = buildAgentExport_(overallSections);
+  // Build compact agent export — condense hook patterns into 5 rules
+  SpreadsheetApp.getActiveSpreadsheet().toast('Generating hook rules for agent... (3/3)', '🤖 AI Analysis', 15);
+  var agentExport = buildAgentExport_(overallSections, key);
 
   // Write to sheet
   writeAiAnalysisSheetV2_(overallSections, recentSections, meta, actualRecent, agentExport);
 }
 
 
-// Extract hook-focused writing rules for the proposal agent.
-// Pulls from the dedicated AGENT HOOK RULES section — Claude is explicitly told
-// to output only hook writing do's/don'ts with examples, nothing else.
-function buildAgentExport_(overallSections) {
-  var rules = findSection_(overallSections, 'AGENT HOOK RULES') || '';
+// Condense HOOK PATTERNS THAT CONVERT into 5 concise DO/DON'T rules for the proposal agent.
+function buildAgentExport_(overallSections, key) {
+  var hooks = findSection_(overallSections, 'HOOK PATTERNS THAT CONVERT') || '';
+  if (!hooks) {
+    PropertiesService.getScriptProperties().setProperty('AGENT_EXPORT', '');
+    return '';
+  }
+
+  var condensePrompt =
+    'Below is an analysis of which proposal hooks work and which don\'t on Upwork.\n\n' +
+    hooks + '\n\n' +
+    'Condense this into EXACTLY 5 short rules (one line each) that a proposal-writing AI should follow. Format:\n' +
+    'DO: [rule] (example: "[quoted hook excerpt]")\n' +
+    'or\n' +
+    'DON\'T: [rule] (example: "[quoted hook excerpt]")\n\n' +
+    'Only output the 5 rules. Nothing else.';
+
+  var rules = callClaude_(key, condensePrompt, 500);
 
   var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  var export_ = 'Updated: ' + ts + '\n' + rules.trim();
+  var export_ = 'Updated: ' + ts + '\n' + (rules || '').trim();
 
   PropertiesService.getScriptProperties().setProperty('AGENT_EXPORT', export_);
   return export_;
