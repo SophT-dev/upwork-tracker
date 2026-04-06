@@ -790,6 +790,17 @@ allData + '\n\n' +
 'Proposals that were viewed but got no reply — what do they have in common? What\'s different about them vs. replied proposals?\n\n' +
 '===SECTION: TOP 5 ACTIONS===\n' +
 'The 5 most impactful changes to make immediately based on everything above. Each action = one concrete sentence with a specific number or target.\n\n' +
+'===SECTION: AGENT HOOK RULES===\n' +
+'This section gets auto-fed to a proposal-writing AI agent. Output ONLY rules about how to WRITE hooks and proposals. No job selection advice. No client filtering. No connect strategy. Format:\n' +
+'DO:\n' +
+'• [specific hook writing pattern that works, with a quoted example from the data]\n' +
+'• [another pattern, with example]\n' +
+'• [another]\n' +
+'DON\'T:\n' +
+'• [specific hook pattern that gets ignored or ghosted, with a quoted example]\n' +
+'• [another, with example]\n' +
+'• [another]\n' +
+'Every rule must be about the WORDS, FRAMING, and OPENING MOVES in the proposal text itself — nothing else.\n\n' +
 'Be ruthlessly specific. If a pattern only has 1-2 data points, say so. Never generalize beyond what the data shows.';
 
   var text1 = callClaude_(key, prompt1, 8000);
@@ -854,37 +865,14 @@ recentData + '\n\n' +
 }
 
 
-// Extract hook-focused writing insights for the proposal agent.
-// Only pulls from HOOK PATTERNS and GHOSTING sections — no job filtering or strategy advice.
+// Extract hook-focused writing rules for the proposal agent.
+// Pulls from the dedicated AGENT HOOK RULES section — Claude is explicitly told
+// to output only hook writing do's/don'ts with examples, nothing else.
 function buildAgentExport_(overallSections) {
-  var hooks = findSection_(overallSections, 'HOOK PATTERNS THAT CONVERT') || '';
-  var ghosting = findSection_(overallSections, 'THE GHOSTING PROBLEM') || '';
-
-  // Extract bullet lines only
-  var hookLines = hooks.split('\n')
-    .map(function(l) { return l.trim(); })
-    .filter(function(l) { return l.indexOf('•') === 0 || l.indexOf('-') === 0; });
-
-  var ghostLines = ghosting.split('\n')
-    .map(function(l) { return l.trim(); })
-    .filter(function(l) { return l.indexOf('•') === 0 || l.indexOf('-') === 0; });
+  var rules = findSection_(overallSections, 'AGENT HOOK RULES') || '';
 
   var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  var parts = ['Updated: ' + ts];
-
-  if (hookLines.length > 0) {
-    parts.push('');
-    parts.push('HOOKS THAT GET VIEWS AND REPLIES:');
-    parts = parts.concat(hookLines.slice(0, 6));
-  }
-
-  if (ghostLines.length > 0) {
-    parts.push('');
-    parts.push('HOOKS THAT GET IGNORED OR GHOSTED:');
-    parts = parts.concat(ghostLines.slice(0, 4));
-  }
-
-  var export_ = parts.join('\n');
+  var export_ = 'Updated: ' + ts + '\n' + rules.trim();
 
   PropertiesService.getScriptProperties().setProperty('AGENT_EXPORT', export_);
   return export_;
