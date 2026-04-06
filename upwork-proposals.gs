@@ -792,7 +792,7 @@ allData + '\n\n' +
 'The 5 most impactful changes to make immediately based on everything above. Each action = one concrete sentence with a specific number or target.\n\n' +
 'Be ruthlessly specific. If a pattern only has 1-2 data points, say so. Never generalize beyond what the data shows.';
 
-  var text1 = callClaude_(key, prompt1, 4000);
+  var text1 = callClaude_(key, prompt1, 8000);
   if (!text1) {
     SpreadsheetApp.getUi().alert('Claude API error on overall analysis. Check your API key and try again.');
     return;
