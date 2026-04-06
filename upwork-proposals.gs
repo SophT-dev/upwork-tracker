@@ -716,18 +716,62 @@ function analyzeWithClaude() {
     latest = String(rows[rows.length - 1][dateIdx] || '—');
   }
 
+  // Pre-calculate exact stats so Claude doesn't miscount
+  var vi = colIdx['Viewed?'], ri = colIdx['Replied?'], ci = colIdx['Closed?'];
+  var invIdx = colIdx['Invite?'], boostIdx = colIdx['Boost Connects'], jsIdx = colIdx['Job Status'];
+
+  var stats = { inviteClosed: 0, organicClosed: 0, inviteReplied: 0, organicReplied: 0,
+                inviteViewed: 0, organicViewed: 0, inviteTotal: 0, organicTotal: 0,
+                boostedViewed: 0, boostedTotal: 0, notBoostedViewed: 0, notBoostedTotal: 0,
+                hiredCount: 0, canceledCount: 0, otherHiredCount: 0 };
+
+  rows.forEach(function(r) {
+    var isInvite = invIdx !== undefined && String(r[invIdx]).toLowerCase() === 'yes';
+    var viewed = vi !== undefined && String(r[vi]).toLowerCase() === 'yes';
+    var replied = ri !== undefined && String(r[ri]).toLowerCase() === 'yes';
+    var closed = ci !== undefined && String(r[ci]).toLowerCase() === 'yes';
+    var boosted = boostIdx !== undefined && parseFloat(r[boostIdx]) > 0;
+    var jobStatus = jsIdx !== undefined ? String(r[jsIdx]).toLowerCase() : '';
+
+    if (isInvite) {
+      stats.inviteTotal++;
+      if (viewed || replied) stats.inviteViewed++;
+      if (replied) stats.inviteReplied++;
+      if (closed || jobStatus === 'hired') stats.inviteClosed++;
+    } else {
+      stats.organicTotal++;
+      if (viewed || replied) stats.organicViewed++;
+      if (replied) stats.organicReplied++;
+      if (closed || jobStatus === 'hired') stats.organicClosed++;
+    }
+    if (boosted) { stats.boostedTotal++; if (viewed || replied) stats.boostedViewed++; }
+    else { stats.notBoostedTotal++; if (viewed || replied) stats.notBoostedViewed++; }
+
+    if (jobStatus === 'hired') stats.hiredCount++;
+    else if (jobStatus === 'canceled') stats.canceledCount++;
+    else if (jobStatus === 'other hired') stats.otherHiredCount++;
+  });
+
   // ── API Call 1: Overall Portfolio Analysis ──
   SpreadsheetApp.getActiveSpreadsheet().toast('Analyzing overall patterns... (1/2)', '🤖 AI Analysis', 30);
 
   var prompt1 =
 'You are an elite Upwork freelance strategist. Analyze this freelancer\'s complete proposal history and deliver brutally specific, data-backed insights. No generic advice — every point must reference actual numbers or patterns from this data.\n\n' +
-'PORTFOLIO STATS\n' +
+'VERIFIED STATS (pre-calculated — use these exact numbers, do NOT recount from the data):\n' +
 'Total proposals: ' + overall.count + '\n' +
-'View rate: ' + pct_(overall.viewRate) + ' | Reply rate: ' + pct_(overall.replyRate) + ' | Close rate: ' + pct_(overall.closeRate) + '\n' +
+'Viewed: ' + overall.viewed + ' (' + pct_(overall.viewRate) + ') | Replied: ' + overall.replied + ' (' + pct_(overall.replyRate) + ') | Closed: ' + overall.closed + ' (' + pct_(overall.closeRate) + ')\n' +
+'Hired: ' + stats.hiredCount + ' | Canceled: ' + stats.canceledCount + ' | Other Hired: ' + stats.otherHiredCount + '\n' +
+'Invites: ' + stats.inviteTotal + ' total, ' + stats.inviteViewed + ' viewed, ' + stats.inviteReplied + ' replied, ' + stats.inviteClosed + ' closed\n' +
+'Organic: ' + stats.organicTotal + ' total, ' + stats.organicViewed + ' viewed, ' + stats.organicReplied + ' replied, ' + stats.organicClosed + ' closed\n' +
+'Boosted: ' + stats.boostedTotal + ' total, ' + stats.boostedViewed + ' viewed | Not boosted: ' + stats.notBoostedTotal + ' total, ' + stats.notBoostedViewed + ' viewed\n' +
 'Date range: ' + earliest + ' to ' + latest + '\n\n' +
 'FULL PROPOSAL DATA (one row per proposal):\n' +
 allData + '\n\n' +
-'Respond with EXACTLY these sections using these EXACT headers (===SECTION: NAME=== format). Under each header, give 3-6 bullet points starting with •. Every bullet must cite specific data (numbers, percentages, examples from above).\n\n' +
+'CRITICAL FORMATTING RULES:\n' +
+'1. Use EXACTLY these section delimiters — copy-paste them verbatim, including the === on both sides.\n' +
+'2. Under each header, give 3-6 bullet points starting with •.\n' +
+'3. Every bullet must cite specific data (numbers, percentages, examples from above).\n' +
+'4. Use the VERIFIED STATS numbers above — do NOT recount from the raw data.\n\n' +
 '===SECTION: KEY TAKEAWAYS===\n' +
 'The 4-5 most important patterns this data reveals. Each bullet = one sharp sentence.\n\n' +
 '===SECTION: CLIENT PROFILE WINNERS VS LOSERS===\n' +
@@ -876,22 +920,42 @@ function parseSectionsV2_(text) {
 
 
 // Fuzzy lookup: find a section by keyword fragments (case-insensitive)
-// e.g. findSection_(sections, 'TOP 5 ACTIONS') matches 'TOP 5 ACTIONS TO IMPLEMENT'
+// e.g. findSection_(sections, 'TOP 5 ACTIONS') matches 'TOP 5 ACTIONS TO IMPLEMENT' or 'TOP FIVE ACTIONS'
 function findSection_(sections, name) {
   // Exact match first
   if (sections[name]) return sections[name];
 
-  // Keyword-based fallback: all words in `name` must appear in the key
-  var keywords = name.split(/\s+/);
+  // Normalize: replace number words with digits for matching
+  function normalize(s) {
+    return s.replace(/\bFIVE\b/g, '5').replace(/\bTHREE\b/g, '3').replace(/\bTEN\b/g, '10');
+  }
+
+  var normName = normalize(name);
+  var keywords = normName.split(/\s+/);
   var keys = Object.keys(sections);
+
+  // Try normalized keyword match
   for (var i = 0; i < keys.length; i++) {
-    var key = keys[i];
+    var normKey = normalize(keys[i]);
     var allMatch = true;
     for (var k = 0; k < keywords.length; k++) {
-      if (key.indexOf(keywords[k]) === -1) { allMatch = false; break; }
+      if (normKey.indexOf(keywords[k]) === -1) { allMatch = false; break; }
     }
-    if (allMatch) return sections[key];
+    if (allMatch) return sections[keys[i]];
   }
+
+  // Last resort: partial match — if key contains any 2+ keywords from name
+  if (keywords.length >= 2) {
+    for (var i = 0; i < keys.length; i++) {
+      var normKey = normalize(keys[i]);
+      var matchCount = 0;
+      for (var k = 0; k < keywords.length; k++) {
+        if (normKey.indexOf(keywords[k]) !== -1) matchCount++;
+      }
+      if (matchCount >= 2) return sections[keys[i]];
+    }
+  }
+
   return null;
 }
 
