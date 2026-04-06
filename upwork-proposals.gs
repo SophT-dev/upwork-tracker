@@ -195,18 +195,7 @@ function addProposal(data) {
 // Deploy as: Extensions → Apps Script → Deploy → New deployment
 //   Type: Web app | Execute as: Me | Who has access: Anyone
 //
-// doGet: serves agent insights export (GET ?action=insights)
 // doPost: receives proposal data from Chrome extension
-
-function doGet(e) {
-  var action = (e && e.parameter && e.parameter.action) || '';
-  if (action === 'insights') {
-    var export_ = PropertiesService.getScriptProperties().getProperty('AGENT_EXPORT') || '';
-    return ContentService.createTextOutput(export_).setMimeType(ContentService.MimeType.TEXT);
-  }
-  return ContentService.createTextOutput('ok');
-}
-
 //
 // Column order is determined by your sheet's header row — rearrange freely.
 // Add or remove columns without touching this script.
@@ -753,7 +742,7 @@ function analyzeWithClaude() {
   });
 
   // ── API Call 1: Overall Portfolio Analysis ──
-  SpreadsheetApp.getActiveSpreadsheet().toast('Analyzing overall patterns... (1/3)', '🤖 AI Analysis', 30);
+  SpreadsheetApp.getActiveSpreadsheet().toast('Analyzing overall patterns... (1/2)', '🤖 AI Analysis', 30);
 
   var prompt1 =
 'You are an elite Upwork freelance strategist. Analyze this freelancer\'s complete proposal history and deliver brutally specific, data-backed insights. No generic advice — every point must reference actual numbers or patterns from this data.\n\n' +
@@ -802,7 +791,7 @@ allData + '\n\n' +
   var recentCount = parseInt(PropertiesService.getScriptProperties().getProperty('RECENT_COUNT') || '10');
   var actualRecent = Math.min(recentCount, rows.length);
 
-  SpreadsheetApp.getActiveSpreadsheet().toast('Analyzing recent ' + actualRecent + ' proposals... (2/3)', '🤖 AI Analysis', 30);
+  SpreadsheetApp.getActiveSpreadsheet().toast('Analyzing recent ' + actualRecent + ' proposals... (2/2)', '🤖 AI Analysis', 30);
 
   var recentData = buildRecentForClaude_(rows, colIdx, actualRecent);
 
@@ -846,39 +835,8 @@ recentData + '\n\n' +
   PropertiesService.getScriptProperties().setProperty('AI_INSIGHTS_TEXT', text1 + '\n\n---RECENT---\n\n' + (text2 || ''));
   PropertiesService.getScriptProperties().setProperty('AI_INSIGHTS_META', meta);
 
-  // Build compact agent export — condense hook patterns into 5 rules
-  SpreadsheetApp.getActiveSpreadsheet().toast('Generating hook rules for agent... (3/3)', '🤖 AI Analysis', 15);
-  var agentExport = buildAgentExport_(overallSections, key);
-
   // Write to sheet
-  writeAiAnalysisSheetV2_(overallSections, recentSections, meta, actualRecent, agentExport);
-}
-
-
-// Condense HOOK PATTERNS THAT CONVERT into 5 concise DO/DON'T rules for the proposal agent.
-function buildAgentExport_(overallSections, key) {
-  var hooks = findSection_(overallSections, 'HOOK PATTERNS THAT CONVERT') || '';
-  if (!hooks) {
-    PropertiesService.getScriptProperties().setProperty('AGENT_EXPORT', '');
-    return '';
-  }
-
-  var condensePrompt =
-    'Below is an analysis of which proposal hooks work and which don\'t on Upwork.\n\n' +
-    hooks + '\n\n' +
-    'Condense this into EXACTLY 5 short rules (one line each) that a proposal-writing AI should follow. Format:\n' +
-    'DO: [rule] (example: "[quoted hook excerpt]")\n' +
-    'or\n' +
-    'DON\'T: [rule] (example: "[quoted hook excerpt]")\n\n' +
-    'Only output the 5 rules. Nothing else.';
-
-  var rules = callClaude_(key, condensePrompt, 500);
-
-  var ts = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  var export_ = 'Updated: ' + ts + '\n' + (rules || '').trim();
-
-  PropertiesService.getScriptProperties().setProperty('AGENT_EXPORT', export_);
-  return export_;
+  writeAiAnalysisSheetV2_(overallSections, recentSections, meta, actualRecent);
 }
 
 
@@ -983,7 +941,7 @@ function writeSpacer_(sheet, row, height) {
 
 
 // Full-width stacked layout for AI Analysis sheet
-function writeAiAnalysisSheetV2_(overallSections, recentSections, meta, recentCount, agentExport) {
+function writeAiAnalysisSheetV2_(overallSections, recentSections, meta, recentCount) {
   var sheet = getOrCreateSheet_('🤖 AI Analysis');
   sheet.clearContents();
   sheet.clearFormats();
@@ -1091,27 +1049,6 @@ function writeAiAnalysisSheetV2_(overallSections, recentSections, meta, recentCo
       .setValue('⚠️ Recent analysis could not be generated. Try running again.')
       .setFontColor('#c62828').setFontStyle('italic').setFontSize(11);
     sheet.setRowHeight(row, 30);
-  }
-
-  // ── AGENT EXPORT block ──
-  if (agentExport) {
-    row = writeSpacer_(sheet, row, 20);
-
-    sheet.getRange(row, 1, 1, COLS).merge()
-      .setValue('AGENT EXPORT — auto-fed to proposal agent')
-      .setBackground('#424242').setFontColor('#ffffff')
-      .setFontWeight('bold').setFontSize(11);
-    sheet.setRowHeight(row, 28);
-    row++;
-
-    sheet.getRange(row, 1, 1, COLS).merge()
-      .setValue(agentExport)
-      .setBackground('#f5f5f5').setFontColor('#333333')
-      .setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP)
-      .setVerticalAlignment('top').setFontSize(10)
-      .setFontFamily('Roboto Mono');
-    var exportHeight = Math.max(60, agentExport.split('\n').length * 20);
-    sheet.setRowHeight(row, exportHeight);
   }
 
   SpreadsheetApp.getActiveSpreadsheet().toast('Done! Check the 🤖 AI Analysis tab.', '🤖 AI Analysis', 5);
