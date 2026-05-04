@@ -691,16 +691,21 @@ function buildRecentForClaude_(rows, colIdx, count) {
 
 function classifyIndustry_(title, category, skills) {
   var key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
-  if (!key) return { main: 'Other', niche: '' };
+  if (!key) return { main: 'N/A', niche: 'N/A' };
 
   var snippet = 'Job Title: ' + title + '\nCategory: ' + category + '\nSkills: ' + String(skills || '').substring(0, 200);
   var prompt =
     'Classify this Upwork job into two fields.\n\n' +
-    'MAIN_INDUSTRY: Pick exactly one from this list: SaaS / Software, E-commerce / DTC, Coaching / Consulting, Real Estate, Healthcare / Wellness, Recruitment / Staffing, Marketing Agency, Fintech / Finance, Legal, Local Services, E-learning / Education, Non-profit, Other\n\n' +
-    'NICHE_INDUSTRY: Write a freeform 2-5 word description of the specific niche or sub-market (e.g. "TikTok Shop sellers", "Home service franchise operators", "B2B SaaS trial conversion"). Be specific.\n\n' +
+    'MAIN_INDUSTRY: Identify the END CLIENT\'S industry — the type of business or sector that hired this freelancer. ' +
+    'Pick exactly one from this list: SaaS / Software, E-commerce / DTC, Coaching / Consulting, Real Estate, Healthcare / Wellness, Recruitment / Staffing, Marketing Agency, Fintech / Finance, Legal, Local Services, E-learning / Education, Non-profit\n' +
+    'IMPORTANT: If the job post is about cold email, outreach, lead gen, email marketing, or similar services WITHOUT specifying what industry the client is in — output N/A. ' +
+    'Do NOT use "Marketing Agency" just because the job involves marketing. Only use it if the client is actually a marketing agency hiring for their own business.\n\n' +
+    'NICHE_INDUSTRY: Write a 2-5 word description of the specific sub-market or client type being targeted (e.g. "TikTok Shop sellers", "Home service franchise operators", "B2B SaaS trial conversion", "Personal injury law firms"). ' +
+    'This must describe WHO the client serves or WHO the client is — not the service being performed. ' +
+    'If the job post gives no clue about the target industry or client type, output N/A.\n\n' +
     'Reply in exactly this format:\n' +
-    'MAIN: [value]\n' +
-    'NICHE: [value]\n\n' +
+    'MAIN: [value or N/A]\n' +
+    'NICHE: [value or N/A]\n\n' +
     'Job info:\n' + snippet;
 
   var response = callClaude_(key, prompt, 100);
@@ -709,8 +714,8 @@ function classifyIndustry_(title, category, skills) {
   var mainMatch = response.match(/MAIN:\s*(.+)/);
   var nicheMatch = response.match(/NICHE:\s*(.+)/);
   return {
-    main:  mainMatch  ? mainMatch[1].trim()  : 'Other',
-    niche: nicheMatch ? nicheMatch[1].trim() : ''
+    main:  mainMatch  ? mainMatch[1].trim()  : 'N/A',
+    niche: nicheMatch ? nicheMatch[1].trim() : 'N/A'
   };
 }
 
