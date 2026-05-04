@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Upwork Competitor Profiler",
+  "version": "1.0",
+  "description": "One-click saving of competitor Upwork profiles to Google Sheets",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["https://www.upwork.com/*"],
+  "action": {
+    "default_title": "Save Competitor Profile"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+}

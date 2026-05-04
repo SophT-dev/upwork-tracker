@@ -18,13 +18,20 @@ function onOpen() {
     .addItem('🤖 Run AI Analysis', 'analyzeWithClaude')
     .addItem('🎨 Apply Job Status Colors', 'applyJobStatusColors')
     .addItem('⚙️ Set Recent Count', 'setRecentCount')
+    .addSeparator()
+    .addItem('🎣 Build Hook Analysis', 'buildHookAnalysis')
+    .addItem('🎣 Force Re-cluster All', 'forceReclusterAll')
+    .addSeparator()
+    .addItem('Add Industry Columns (run once)', 'addIndustryHeaders')
+    .addItem('🏭 Classify Missing Industries', 'classifyMissingIndustries')
     .addToUi();
 }
 
 function setupHeaders() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
   var headers = [
-    'Date', 'Job Title', 'Category', 'Job Type', 'Budget', 'Hours/Week',
+    'Date', 'Job Title', 'Category', 'Main Industry', 'Niche Industry',
+    'Job Type', 'Budget', 'Hours/Week',
     'Experience Level', 'Duration', 'Skills', 'Connects Required',
     'Invite?', 'Client Location', 'Payment Verified', 'Client Rating',
     'Hire Rate', 'Client Spent', 'Jobs Posted', 'Avg Hourly Rate', 'Member Since',
@@ -279,6 +286,19 @@ function doPost(e) {
       sheet.getRange(lastRow, jobStatusCol + 1).setDataValidation(jsRule);
     }
     applyJobStatusColors_();
+
+    // Classify industry server-side (no Chrome extension changes needed)
+    var mainIndustryCol  = headers.indexOf('Main Industry');
+    var nicheIndustryCol = headers.indexOf('Niche Industry');
+    if (mainIndustryCol !== -1 || nicheIndustryCol !== -1) {
+      var industry = classifyIndustry_(
+        data['jobTitle']  || '',
+        data['category']  || '',
+        data['skills']    || ''
+      );
+      if (mainIndustryCol  !== -1) sheet.getRange(lastRow, mainIndustryCol  + 1).setValue(industry.main);
+      if (nicheIndustryCol !== -1) sheet.getRange(lastRow, nicheIndustryCol + 1).setValue(industry.niche);
+    }
 
     sheet.getRange(lastRow, 1, 1, lastCol).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
     var hookCol = headers.indexOf('Hook');
@@ -595,6 +615,18 @@ function setRecentCount() {
 }
 
 // Serialize all proposal rows into compact pipe-delimited format for Claude
+// Relabel job status strings before sending to Claude so substring matching
+// can never confuse "Other Hired" with "Hired". These labels are ONLY used
+// in the data fed to Claude — the sheet itself still shows the friendly names.
+function relabelJobStatus_(raw) {
+  var s = String(raw || '').trim().toLowerCase();
+  if (s === 'hired') return 'WON_BY_US';
+  if (s === 'other hired') return 'LOST_TO_COMPETITOR';
+  if (s === 'canceled' || s === 'cancelled') return 'JOB_CANCELED';
+  if (s === 'still active') return 'STILL_ACTIVE';
+  return raw || '—';
+}
+
 function buildProposalDataForClaude_(rows, colIdx) {
   var fields = [
     'Date', 'Job Title', 'Category', 'Job Type', 'Budget', 'Hours/Week',
@@ -614,6 +646,7 @@ function buildProposalDataForClaude_(rows, colIdx) {
       var key = fields[f];
       var idx = colIdx[key];
       var val = (idx !== undefined) ? String(r[idx] || '').trim() : '—';
+      if (key === 'Job Status') val = relabelJobStatus_(val);
       // Truncate hooks to 200 chars in the overall view
       if (key === 'Hook' && val.length > 200) val = val.substring(0, 200) + '...';
       vals.push(val);
@@ -644,12 +677,135 @@ function buildRecentForClaude_(rows, colIdx, count) {
       var key = fields[f];
       var idx = colIdx[key];
       var val = (idx !== undefined) ? String(r[idx] || '').trim() : '—';
+      if (key === 'Job Status') val = relabelJobStatus_(val);
       // Full hook text — no truncation
       vals.push(val);
     }
     lines.push('#' + (startNum + i) + ' | ' + vals.join(' | '));
   }
   return lines.join('\n');
+}
+
+// ── INDUSTRY CLASSIFICATION ───────────────────────────────────────────────────
+// Called server-side on every new row. No changes to Chrome extension needed.
+
+function classifyIndustry_(title, category, skills) {
+  var key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (!key) return { main: 'Other', niche: '' };
+
+  var snippet = 'Job Title: ' + title + '\nCategory: ' + category + '\nSkills: ' + String(skills || '').substring(0, 200);
+  var prompt =
+    'Classify this Upwork job into two fields.\n\n' +
+    'MAIN_INDUSTRY: Pick exactly one from this list: SaaS / Software, E-commerce / DTC, Coaching / Consulting, Real Estate, Healthcare / Wellness, Recruitment / Staffing, Marketing Agency, Fintech / Finance, Legal, Local Services, E-learning / Education, Non-profit, Other\n\n' +
+    'NICHE_INDUSTRY: Write a freeform 2-5 word description of the specific niche or sub-market (e.g. "TikTok Shop sellers", "Home service franchise operators", "B2B SaaS trial conversion"). Be specific.\n\n' +
+    'Reply in exactly this format:\n' +
+    'MAIN: [value]\n' +
+    'NICHE: [value]\n\n' +
+    'Job info:\n' + snippet;
+
+  var response = callClaude_(key, prompt, 100);
+  if (!response) return { main: 'Other', niche: '' };
+
+  var mainMatch = response.match(/MAIN:\s*(.+)/);
+  var nicheMatch = response.match(/NICHE:\s*(.+)/);
+  return {
+    main:  mainMatch  ? mainMatch[1].trim()  : 'Other',
+    niche: nicheMatch ? nicheMatch[1].trim() : ''
+  };
+}
+
+// Run once on an existing sheet to insert Main Industry + Niche Industry columns
+// after Category without destroying any existing data.
+function addIndustryHeaders() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var catIdx = headers.indexOf('Category'); // 0-based
+  if (catIdx === -1) {
+    SpreadsheetApp.getUi().alert('Could not find "Category" column. Make sure your header row is set up.');
+    return;
+  }
+  var afterCol = catIdx + 1; // 1-based column number of Category
+  sheet.insertColumnsAfter(afterCol, 2);
+  sheet.getRange(1, afterCol + 1).setValue('Main Industry');
+  sheet.getRange(1, afterCol + 2).setValue('Niche Industry');
+  sheet.getRange(1, afterCol + 1, 1, 2)
+    .setFontWeight('bold')
+    .setBackground('#14a800')
+    .setFontColor('#ffffff');
+  SpreadsheetApp.getUi().alert(
+    '"Main Industry" and "Niche Industry" columns added after "Category".\n\n' +
+    'Run "🏭 Classify Missing Industries" from the menu to backfill existing rows.'
+  );
+}
+
+// Backfill industry classification for all rows where both columns are blank.
+function classifyMissingIndustries() {
+  var key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (!key) {
+    SpreadsheetApp.getUi().alert(
+      'Missing API key.\n\nGo to Extensions → Apps Script → Project Settings → Script Properties\nand add: ANTHROPIC_API_KEY = your key'
+    );
+    return;
+  }
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2) { SpreadsheetApp.getUi().alert('No data rows found.'); return; }
+
+  var all = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var headers = all[0];
+  var titleIdx  = headers.indexOf('Job Title');
+  var catIdx    = headers.indexOf('Category');
+  var skillsIdx = headers.indexOf('Skills');
+  var mainCol   = headers.indexOf('Main Industry');
+  var nicheCol  = headers.indexOf('Niche Industry');
+
+  if (mainCol === -1 && nicheCol === -1) {
+    SpreadsheetApp.getUi().alert(
+      'Industry columns not found.\n\nRun "Add Industry Columns (run once)" from the menu first.'
+    );
+    return;
+  }
+
+  var toClassify = [];
+  for (var i = 1; i < all.length; i++) {
+    if (!all[i][0]) continue; // skip empty rows
+    var mainBlank  = mainCol  === -1 || String(all[i][mainCol]  || '').trim() === '';
+    var nicheBlank = nicheCol === -1 || String(all[i][nicheCol] || '').trim() === '';
+    if (mainBlank && nicheBlank) toClassify.push({ sheetRow: i + 1, row: all[i] });
+  }
+
+  if (toClassify.length === 0) {
+    SpreadsheetApp.getUi().alert('All rows already have industry classifications.');
+    return;
+  }
+
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    'Classifying ' + toClassify.length + ' rows — this may take a minute...', '🏭 Industry', 300
+  );
+
+  var done = 0;
+  toClassify.forEach(function(item) {
+    var r      = item.row;
+    var title  = titleIdx  !== -1 ? String(r[titleIdx]  || '') : '';
+    var cat    = catIdx    !== -1 ? String(r[catIdx]    || '') : '';
+    var skills = skillsIdx !== -1 ? String(r[skillsIdx] || '') : '';
+    var result = classifyIndustry_(title, cat, skills);
+    if (mainCol  !== -1) sheet.getRange(item.sheetRow, mainCol  + 1).setValue(result.main);
+    if (nicheCol !== -1) sheet.getRange(item.sheetRow, nicheCol + 1).setValue(result.niche);
+    done++;
+    if (done % 10 === 0) {
+      SpreadsheetApp.getActiveSpreadsheet().toast(
+        done + ' / ' + toClassify.length + ' done...', '🏭 Industry', 300
+      );
+    }
+  });
+
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    'Done! ' + done + ' rows classified.', '🏭 Industry', 5
+  );
 }
 
 // Call Claude API and return text response (or null on failure)
@@ -746,10 +902,17 @@ function analyzeWithClaude() {
 
   var prompt1 =
 'You are an elite Upwork freelance strategist. Analyze this freelancer\'s complete proposal history and deliver brutally specific, data-backed insights. No generic advice — every point must reference actual numbers or patterns from this data.\n\n' +
+'CRITICAL DEFINITIONS — DO NOT CONFUSE THESE:\n' +
+'• WON_BY_US = the user was hired for this job. This is a WIN.\n' +
+'• LOST_TO_COMPETITOR = someone ELSE was hired. The user LOST this job to another freelancer. These are the most important rows to analyze — they prove the job was real and winnable.\n' +
+'• JOB_CANCELED = the client canceled the job entirely. Nobody was hired. Lower signal than LOST_TO_COMPETITOR.\n' +
+'• STILL_ACTIVE = unresolved. Do not count as either win or loss.\n' +
+'NEVER describe a LOST_TO_COMPETITOR row as a win or success. NEVER bundle WON_BY_US and LOST_TO_COMPETITOR counts together. They are opposites.\n\n' +
+'You MUST output ALL sections listed below in order. If you run out of space, shorten earlier sections — never drop the WHY WE LOST TO COMPETITORS, THE GHOSTING PROBLEM, or TOP 5 ACTIONS sections.\n\n' +
 'VERIFIED STATS (pre-calculated — use these exact numbers, do NOT recount from the data):\n' +
 'Total proposals: ' + overall.count + '\n' +
 'Viewed: ' + overall.viewed + ' (' + pct_(overall.viewRate) + ') | Replied: ' + overall.replied + ' (' + pct_(overall.replyRate) + ') | Closed: ' + overall.closed + ' (' + pct_(overall.closeRate) + ')\n' +
-'Hired: ' + stats.hiredCount + ' | Canceled: ' + stats.canceledCount + ' | Other Hired: ' + stats.otherHiredCount + '\n' +
+'WON_BY_US: ' + stats.hiredCount + ' | LOST_TO_COMPETITOR: ' + stats.otherHiredCount + ' | JOB_CANCELED: ' + stats.canceledCount + '\n' +
 'Invites: ' + stats.inviteTotal + ' total, ' + stats.inviteViewed + ' viewed, ' + stats.inviteReplied + ' replied, ' + stats.inviteClosed + ' closed\n' +
 'Organic: ' + stats.organicTotal + ' total, ' + stats.organicViewed + ' viewed, ' + stats.organicReplied + ' replied, ' + stats.organicClosed + ' closed\n' +
 'Boosted: ' + stats.boostedTotal + ' total, ' + stats.boostedViewed + ' viewed | Not boosted: ' + stats.notBoostedTotal + ' total, ' + stats.notBoostedViewed + ' viewed\n' +
@@ -762,7 +925,9 @@ allData + '\n\n' +
 '3. Every bullet must cite specific data (numbers, percentages, examples from above).\n' +
 '4. Use the VERIFIED STATS numbers above — do NOT recount from the raw data.\n\n' +
 '===SECTION: KEY TAKEAWAYS===\n' +
-'The 4-5 most important patterns this data reveals. Each bullet = one sharp sentence.\n\n' +
+'The 4-5 most important patterns this data reveals. Each bullet = one sharp sentence. Treat LOST_TO_COMPETITOR as the highest-signal loss category — these are winnable jobs we lost. Weight insights from these rows heavier than ghosted jobs. Never describe LOST_TO_COMPETITOR rows as wins.\n\n' +
+'===SECTION: WHY WE LOST TO COMPETITORS===\n' +
+'These are LOST_TO_COMPETITOR rows — jobs where the client hired someone else. The post was real, the budget was real, and our proposal lost on merit. For each such job (or each cluster if there are many), identify: (a) what the job needed, (b) likely reason our proposal lost (hook, rate, profile fit, response speed, length), (c) one specific change that would have improved odds. Be brutally specific. Do NOT include WON_BY_US or JOB_CANCELED rows in this section.\n\n' +
 '===SECTION: CLIENT PROFILE WINNERS VS LOSERS===\n' +
 'What client profiles get replies vs don\'t? Analyze: client rating ranges, hire rate ranges, total spend ranges, payment verified vs not, jobs posted count, member since (tenure). Which combos predict success?\n\n' +
 '===SECTION: BUDGET AND RATE PATTERNS===\n' +
@@ -781,10 +946,54 @@ allData + '\n\n' +
 'The 5 most impactful changes to make immediately based on everything above. Each action = one concrete sentence with a specific number or target.\n\n' +
 'Be ruthlessly specific. If a pattern only has 1-2 data points, say so. Never generalize beyond what the data shows.';
 
-  var text1 = callClaude_(key, prompt1, 8000);
+  var text1 = callClaude_(key, prompt1, 12000);
   if (!text1) {
     SpreadsheetApp.getUi().alert('Claude API error on overall analysis. Check your API key and try again.');
     return;
+  }
+
+  // Validate the critical sections actually appeared. If any are missing,
+  // re-call Claude with a focused follow-up that ONLY asks for the missing ones.
+  var requiredSections = ['WHY WE LOST TO COMPETITORS', 'THE GHOSTING PROBLEM', 'TOP 5 ACTIONS'];
+  var probe = parseSectionsV2_(text1);
+  var missing = requiredSections.filter(function(name) {
+    var v = findSection_(probe, name);
+    return !v || String(v).trim().length < 20;
+  });
+  if (missing.length > 0) {
+    Logger.log('Missing sections after first call: ' + missing.join(', ') + ' — retrying focused.');
+    SpreadsheetApp.getActiveSpreadsheet().toast('Filling in missing sections...', '🤖 AI Analysis', 15);
+    var followup =
+      'Earlier you analyzed this freelancer\'s proposal data but did not include the following required sections. Output ONLY these sections now, using the EXACT same delimiter format (===SECTION: NAME===). Do not repeat any other section. Use the same data context as before.\n\n' +
+      'CRITICAL DEFINITIONS:\n' +
+      '• WON_BY_US = the user was hired (a WIN).\n' +
+      '• LOST_TO_COMPETITOR = someone else was hired (a LOSS — most important to analyze).\n' +
+      '• JOB_CANCELED = client canceled.\n' +
+      '• STILL_ACTIVE = unresolved.\n\n' +
+      'VERIFIED STATS:\n' +
+      'Total: ' + overall.count + ' | Viewed: ' + overall.viewed + ' | Replied: ' + overall.replied + '\n' +
+      'WON_BY_US: ' + stats.hiredCount + ' | LOST_TO_COMPETITOR: ' + stats.otherHiredCount + ' | JOB_CANCELED: ' + stats.canceledCount + '\n\n' +
+      'FULL PROPOSAL DATA:\n' + allData + '\n\n' +
+      'Output ONLY these sections, in this order:\n\n' +
+      missing.map(function(name) {
+        if (name === 'WHY WE LOST TO COMPETITORS') {
+          return '===SECTION: WHY WE LOST TO COMPETITORS===\nFor each LOST_TO_COMPETITOR row (or each cluster), identify: (a) what the job needed, (b) likely reason we lost (hook, rate, profile fit, response speed, length), (c) one specific change that would have improved odds. Be brutally specific.';
+        }
+        if (name === 'THE GHOSTING PROBLEM') {
+          return '===SECTION: THE GHOSTING PROBLEM===\nProposals that were viewed but got no reply — what do they have in common? What\'s different about them vs. replied proposals? 4-6 bullets, each with specific data.';
+        }
+        if (name === 'TOP 5 ACTIONS') {
+          return '===SECTION: TOP 5 ACTIONS===\nThe 5 most impactful changes to make immediately based on this data. Each action = one concrete sentence with a specific number or target.';
+        }
+        return '===SECTION: ' + name + '===';
+      }).join('\n\n');
+    var fillText = callClaude_(key, followup, 4000);
+    if (fillText) {
+      // Append the focused follow-up to text1 so parseSectionsV2_ picks up both.
+      text1 = text1 + '\n\n' + fillText;
+    } else {
+      Logger.log('Follow-up call failed; sections may still be missing.');
+    }
   }
 
   // ── API Call 2: Recent N Deep Dive ──
@@ -977,6 +1186,12 @@ function writeAiAnalysisSheetV2_(overallSections, recentSections, meta, recentCo
     '#2e7d32', '#ffffff', '#f1f8e9', COLS);
   row = writeSpacer_(sheet, row, 12);
 
+  // ── WHY WE LOST TO COMPETITORS (orange — high-signal losses) ──
+  row = writeSection_(sheet, row, 'WHY WE LOST TO COMPETITORS',
+    findSection_(overallSections, 'WHY WE LOST TO COMPETITORS'),
+    '#e65100', '#ffffff', '#fff3e0', COLS);
+  row = writeSpacer_(sheet, row, 12);
+
   // ── Main analysis sections (blue) ──
   var blueSections = [
     'CLIENT PROFILE WINNERS VS LOSERS',
@@ -1054,6 +1269,336 @@ function writeAiAnalysisSheetV2_(overallSections, recentSections, meta, recentCo
   SpreadsheetApp.getActiveSpreadsheet().toast('Done! Check the 🤖 AI Analysis tab.', '🤖 AI Analysis', 5);
 }
 
+
+// ============================================================
+// HOOK ANALYSIS — Build a 🎣 Hooks tab clustering all hooks
+// ============================================================
+
+function buildHookAnalysis() {
+  var key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (!key) {
+    SpreadsheetApp.getUi().alert('Missing API key.\n\nGo to Extensions → Apps Script → Project Settings → Script Properties\nand add: ANTHROPIC_API_KEY = your key');
+    return;
+  }
+
+  var d = loadData_();
+  var rows = d.rows, colIdx = d.colIdx;
+  if (rows.length === 0) { SpreadsheetApp.getUi().alert('No proposal data found.'); return; }
+
+  var hookIdx       = colIdx['Hook'];
+  var proposalIdx   = colIdx['Proposal Sent'];
+  var jobTitleIdx   = colIdx['Job Title'];
+  var clientNameIdx = colIdx['Client Name'];
+  var companyIdx    = colIdx['Company'];
+  var inviteIdx     = colIdx['Invite?'];
+  var boostIdx      = colIdx['Boost Connects'];
+  var viewedIdx     = colIdx['Viewed?'];
+  var repliedIdx    = colIdx['Replied?'];
+  var closedIdx     = colIdx['Closed?'];
+  var urlIdx        = colIdx['Source URL'];
+  var dateIdx       = colIdx['Date'];
+
+  // Check existing hook tab — skip rows that already have a cluster assigned
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var existingClusters = {}; // rowNum (1-based) -> cluster label
+  var hookTab = ss.getSheetByName('🎣 Hooks');
+  if (hookTab) {
+    var existingVals = hookTab.getDataRange().getValues();
+    for (var ei = 0; ei < existingVals.length; ei++) {
+      var rNum = parseInt(existingVals[ei][0]);
+      var clusterVal = String(existingVals[ei][6] || '').trim();
+      if (!isNaN(rNum) && rNum > 0 && clusterVal) existingClusters[rNum] = clusterVal;
+    }
+  }
+
+  // Determine which rows need analysis
+  var toAnalyze = [];
+  for (var i = 0; i < rows.length; i++) {
+    var num = i + 1;
+    var hook = hookIdx !== undefined ? String(rows[i][hookIdx] || '').trim() : '';
+    if (hook && !existingClusters[num]) toAnalyze.push({ num: num, row: rows[i] });
+  }
+
+  if (toAnalyze.length === 0) {
+    SpreadsheetApp.getUi().alert('All hooks already have cluster labels. Use "Force Re-cluster All" to start fresh.');
+    return;
+  }
+
+  SpreadsheetApp.getActiveSpreadsheet().toast('Sending ' + toAnalyze.length + ' hooks to Claude...', '🎣 Hook Analysis', 90);
+
+  // Build data for Claude
+  var hookLines = toAnalyze.map(function(item) {
+    var r = item.row;
+    var hook     = hookIdx !== undefined       ? String(r[hookIdx] || '').substring(0, 231) : '';
+    var proposal = proposalIdx !== undefined   ? String(r[proposalIdx] || '').substring(0, 200) : '';
+    var title    = jobTitleIdx !== undefined   ? String(r[jobTitleIdx] || '') : '';
+    var client   = clientNameIdx !== undefined ? String(r[clientNameIdx] || '') : '';
+    var company  = companyIdx !== undefined    ? String(r[companyIdx] || '') : '';
+    var invite   = inviteIdx !== undefined     ? (String(r[inviteIdx] || '').toLowerCase() === 'yes' ? 'Yes' : 'No') : 'No';
+    var boosted  = boostIdx !== undefined      ? (parseFloat(r[boostIdx]) > 0 ? 'Yes' : 'No') : 'No';
+    return '#' + item.num + ' | Title: ' + title + ' | Client: ' + client + ' | Company: ' + company +
+      ' | Invite: ' + invite + ' | Boosted: ' + boosted + '\nHook: ' + hook + '\nProposal preview: ' + proposal;
+  });
+
+  var prompt =
+'You are analyzing ' + hookLines.length + ' Upwork proposal hooks from a cold email specialist.\n\n' +
+'TASK:\n' +
+'1. Define 6-10 cluster labels based on the opening style/structure of these hooks.\n' +
+'2. For each hook, assign a cluster, detect unfair advantages, score it, and write a one-line verdict.\n\n' +
+'UNFAIR ADVANTAGE DEFINITIONS (do NOT include Invite — tracked separately):\n' +
+'- Keyword: hook includes a specific word the client explicitly asked for (e.g. "include the word X")\n' +
+'- Name: client\'s first name appears in the hook\n' +
+'- Company: client\'s company name appears in the hook (cross-reference the Company field)\n' +
+'- Industry Specific: hook shows specific niche knowledge not generic to all cold email jobs\n' +
+'- Job Specific: hook relies on unusual details unique to this exact job post that wouldn\'t transfer to any other proposal\n\n' +
+'SCORING 1-10: Would this hook make a busy client click "read more" from a list of 30 proposals?\n' +
+'10 = specific, irresistible, creates curiosity. 1 = generic, applies to anyone.\n' +
+'Use the proposal preview to judge whether the hook was well-matched to the specific job.\n\n' +
+'OUTPUT — follow this format exactly, no extra text:\n\n' +
+'CLUSTERS:\n' +
+'ClusterName | template pattern with [VARIABLE] slots\n' +
+'(one line per cluster)\n\n' +
+'HOOKS:\n' +
+'#N | ClusterName | Advantage1,Advantage2 or None | score | one-line verdict\n' +
+'(one line per hook, pipe-separated)\n\n' +
+'HOOK DATA:\n' +
+hookLines.join('\n---\n');
+
+  var response = callClaude_(key, prompt, 8000);
+  if (!response) { SpreadsheetApp.getUi().alert('Claude API error. Check your API key and try again.'); return; }
+
+  // Parse clusters
+  var clusters = {}; // name -> pattern
+  var clustersMatch = response.match(/CLUSTERS:\n([\s\S]*?)\n\nHOOKS:/);
+  if (clustersMatch) {
+    clustersMatch[1].trim().split('\n').forEach(function(line) {
+      var parts = line.split('|');
+      if (parts.length >= 2) clusters[parts[0].trim()] = parts[1].trim();
+    });
+  }
+
+  // Parse hook results
+  var hookResults = {}; // rowNum -> {cluster, advantages, score, verdict}
+  var hooksMatch = response.match(/HOOKS:\n([\s\S]*?)(?:\n\nHOOK DATA:|$)/);
+  if (hooksMatch) {
+    hooksMatch[1].trim().split('\n').forEach(function(line) {
+      var parts = line.split('|');
+      if (parts.length >= 5) {
+        var num = parseInt(parts[0].replace('#', '').trim());
+        if (!isNaN(num)) {
+          hookResults[num] = {
+            cluster:    parts[1].trim(),
+            advantages: parts[2].trim() === 'None' ? '' : parts[2].trim(),
+            score:      parts[3].trim(),
+            verdict:    parts.slice(4).join('|').trim()
+          };
+        }
+      }
+    });
+  }
+
+  // Merge new results into existingClusters for writing
+  Object.keys(hookResults).forEach(function(n) { existingClusters[parseInt(n)] = hookResults[parseInt(n)].cluster; });
+
+  // ── Build the full output array (15 cols) ──
+  var COLS = 19;
+  var pad = function(arr) { while (arr.length < COLS) arr.push(''); return arr; };
+
+  var output = [];
+
+  // Taxonomy section
+  output.push(pad(['HOOK TAXONOMY — edit cluster names here; changes reflect in cluster summary below']));
+  output.push(pad(['Cluster Name', 'Template Pattern']));
+  Object.keys(clusters).forEach(function(name) { output.push(pad([name, clusters[name]])); });
+  output.push(pad([])); // spacer
+
+  // Hook rows header
+  output.push(pad(['#', 'Date', 'Job Title', 'Hook', 'Proposal (preview)', 'Source URL',
+    'Hook Template', 'Template Pattern', 'Unfair Advantages', 'Clean?',
+    'Invite?', 'Viewed?', 'Replied?', 'Closed?', 'Score', 'Verdict',
+    'Template Total', 'Template Views', 'Template View%']));
+
+  var headerDataRow = output.length; // for formatting (1-based later)
+
+  // Merge old + new hook data for writing
+  // Build a lookup of all existing hook rows if tab already exists
+  var existingRows = {}; // rowNum -> full row array
+  if (hookTab) {
+    var ev = hookTab.getDataRange().getValues();
+    var hdrRowIdx = -1;
+    for (var hi = 0; hi < ev.length; hi++) {
+      if (String(ev[hi][0]) === '#') { hdrRowIdx = hi; break; }
+    }
+    if (hdrRowIdx !== -1) {
+      for (var hi = hdrRowIdx + 1; hi < ev.length; hi++) {
+        var rn = parseInt(ev[hi][0]);
+        if (!isNaN(rn) && rn > 0) existingRows[rn] = ev[hi];
+      }
+    }
+  }
+
+  // Pass 1 — build clusterStats + collect row data (rows not written yet)
+  var clusterStats = {};
+  var hookRowData = [];
+
+  for (var i = 0; i < rows.length; i++) {
+    var r   = rows[i];
+    var num = i + 1;
+    var result = hookResults[num];
+
+    var cluster = '';
+    var advantages = '';
+    var score = '';
+    var verdict = '';
+
+    if (result) {
+      cluster    = result.cluster;
+      advantages = result.advantages;
+      score      = result.score;
+      verdict    = result.verdict;
+    } else if (existingRows[num]) {
+      cluster    = String(existingRows[num][6] || '');
+      advantages = String(existingRows[num][8] || '');
+      score      = String(existingRows[num][13] || '');
+      verdict    = String(existingRows[num][14] || '');
+    }
+
+    var invite = inviteIdx !== undefined ? String(r[inviteIdx] || '').toLowerCase() === 'yes' : false;
+    if (invite && advantages) advantages = 'Invite, ' + advantages;
+    else if (invite) advantages = 'Invite';
+    var clean = advantages === '' ? 'Yes' : 'No';
+    var clusterPattern = clusters[cluster] || (existingRows[num] ? String(existingRows[num][7] || '') : '');
+
+    var hook      = hookIdx !== undefined       ? String(r[hookIdx] || '').substring(0, 231) : '';
+    var proposal  = proposalIdx !== undefined   ? String(r[proposalIdx] || '').substring(0, 300) : '';
+    var url       = urlIdx !== undefined        ? r[urlIdx] : '';
+    var title     = jobTitleIdx !== undefined   ? r[jobTitleIdx] : '';
+    var date      = dateIdx !== undefined       ? r[dateIdx] : '';
+    var inviteVal = inviteIdx !== undefined      ? String(r[inviteIdx] || '') : '';
+    var viewed    = viewedIdx !== undefined     ? r[viewedIdx] : '';
+    var replied   = repliedIdx !== undefined    ? r[repliedIdx] : '';
+    var closed    = closedIdx !== undefined     ? r[closedIdx] : '';
+
+    if (!hook) continue;
+
+    hookRowData.push({ num: num, date: date, title: title, hook: hook, proposal: proposal, url: url,
+      cluster: cluster, clusterPattern: clusterPattern, advantages: advantages, clean: clean,
+      inviteVal: inviteVal, viewed: viewed, replied: replied, closed: closed, score: score, verdict: verdict });
+
+    if (!cluster) continue;
+    if (!clusterStats[cluster]) clusterStats[cluster] = { count: 0, cleanCount: 0, rawViewed: 0, cleanViewed: 0, replied: 0, closed: 0, totalScore: 0, scoreCount: 0 };
+    var s = clusterStats[cluster];
+    var isViewed  = String(viewed).toLowerCase() === 'yes';
+    var isReplied = String(replied).toLowerCase() === 'yes';
+    var isClosed  = String(closed).toLowerCase() === 'yes';
+    var scoreNum  = parseFloat(score) || 0;
+    s.count++;
+    s.rawViewed   += isViewed ? 1 : 0;
+    s.replied     += isReplied ? 1 : 0;
+    s.closed      += isClosed ? 1 : 0;
+    if (scoreNum > 0) { s.totalScore += scoreNum; s.scoreCount++; }
+    if (clean === 'Yes') {
+      s.cleanCount++;
+      s.cleanViewed += isViewed ? 1 : 0;
+    }
+  }
+
+  // Pass 2 — write hook rows now that clusterStats is fully built
+  for (var j = 0; j < hookRowData.length; j++) {
+    var hd = hookRowData[j];
+    var cs = clusterStats[hd.cluster] || { count: 0, rawViewed: 0 };
+    var tmplViewPct = cs.count > 0 ? (cs.rawViewed / cs.count * 100).toFixed(0) + '%' : '—';
+    output.push([hd.num, hd.date, hd.title, hd.hook, hd.proposal, hd.url,
+      hd.cluster, hd.clusterPattern, hd.advantages, hd.clean,
+      hd.inviteVal, hd.viewed, hd.replied, hd.closed, hd.score, hd.verdict,
+      cs.count, cs.rawViewed, tmplViewPct]);
+  }
+
+  // Spacer + cluster summary
+  output.push(pad([]));
+  output.push(pad(['CLUSTER SUMMARY']));
+  output.push(pad(['Cluster', 'Count', 'Clean Count', 'Raw View%', 'Clean View%', 'Reply%', 'Close%', 'Avg Score']));
+
+  var summaryRows = Object.keys(clusterStats).map(function(c) {
+    var s = clusterStats[c];
+    var fmt = function(n, d) { return d > 0 ? (n / d * 100).toFixed(0) + '%' : '—'; };
+    var avgScore = s.scoreCount > 0 ? (s.totalScore / s.scoreCount).toFixed(1) : '—';
+    return [c, s.count, s.cleanCount, fmt(s.rawViewed, s.count), fmt(s.cleanViewed, s.cleanCount), fmt(s.replied, s.count), fmt(s.closed, s.count), avgScore];
+  });
+  summaryRows.sort(function(a, b) {
+    var av = a[4] === '—' ? -1 : parseInt(a[4]);
+    var bv = b[4] === '—' ? -1 : parseInt(b[4]);
+    return bv - av;
+  });
+  summaryRows.forEach(function(row) { output.push(pad(row)); });
+
+  // ── Write to sheet ──
+  if (!hookTab) hookTab = ss.insertSheet('🎣 Hooks', 1);
+  hookTab.clearContents();
+  hookTab.clearFormats();
+  hookTab.getRange(1, 1, output.length, COLS).setValues(output);
+
+  // ── Formatting ──
+  var green = '#14a800', white = '#ffffff', lightGreen = '#e8f5e9', gray = '#f5f5f5';
+
+  // Taxonomy header
+  hookTab.getRange(1, 1, 1, COLS).setBackground(green).setFontColor(white).setFontWeight('bold');
+  hookTab.getRange(2, 1, 1, 2).setBackground(lightGreen).setFontWeight('bold');
+
+  // Hook rows header
+  var hdrRow = headerDataRow;
+  hookTab.getRange(hdrRow, 1, 1, COLS).setBackground(green).setFontColor(white).setFontWeight('bold');
+  hookTab.setFrozenRows(hdrRow);
+
+  // Alternating rows for hook data
+  var dataStart = hdrRow + 1;
+  var dataEnd = dataStart + hookRowData.length - 1;
+  for (var ri = dataStart; ri <= dataEnd; ri++) {
+    hookTab.getRange(ri, 1, 1, COLS).setBackground(ri % 2 === 0 ? gray : white);
+  }
+
+  // Cluster summary header
+  var summaryTitleRow = dataEnd + 2;
+  hookTab.getRange(summaryTitleRow, 1, 1, COLS).setBackground(green).setFontColor(white).setFontWeight('bold');
+  hookTab.getRange(summaryTitleRow + 1, 1, 1, COLS).setBackground(lightGreen).setFontWeight('bold');
+
+  // Column widths
+  hookTab.setColumnWidth(1, 35);   // #
+  hookTab.setColumnWidth(2, 80);   // Date
+  hookTab.setColumnWidth(3, 200);  // Job Title
+  hookTab.setColumnWidth(4, 420);  // Hook
+  hookTab.setColumnWidth(5, 80);   // Proposal preview (hidden from view, used by Claude)
+  hookTab.setColumnWidth(6, 100);  // URL
+  hookTab.setColumnWidth(7, 150);  // Hook Template
+  hookTab.setColumnWidth(8, 300);  // Template Pattern
+  hookTab.setColumnWidth(9, 160);  // Advantages
+  hookTab.setColumnWidth(10, 60);  // Clean?
+  hookTab.setColumnWidth(11, 60);  // Invite?
+  hookTab.setColumnWidth(12, 65);  // Viewed?
+  hookTab.setColumnWidth(13, 65);  // Replied?
+  hookTab.setColumnWidth(14, 60);  // Closed?
+  hookTab.setColumnWidth(15, 55);  // Score
+  hookTab.setColumnWidth(16, 320); // Verdict
+  hookTab.setColumnWidth(17, 110); // Template Total
+  hookTab.setColumnWidth(18, 110); // Template Views
+  hookTab.setColumnWidth(19, 110); // Template View%
+
+  // Wrap: Hook (D), Template Pattern (H), Verdict (P) — Proposal preview (E) stays clipped
+  [4, 8, 16].forEach(function(col) {
+    hookTab.getRange(dataStart, col, hookRowData.length, 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+  });
+  hookTab.setRowHeightsForced(dataStart, hookRowData.length, 110);
+
+  SpreadsheetApp.getActiveSpreadsheet().setActiveSheet(hookTab);
+  SpreadsheetApp.getActiveSpreadsheet().toast('Done! ' + toAnalyze.length + ' hooks analyzed. Check the 🎣 Hooks tab.', '🎣 Hook Analysis', 5);
+}
+
+function forceReclusterAll() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var hookTab = ss.getSheetByName('🎣 Hooks');
+  if (hookTab) hookTab.clearContents();
+  buildHookAnalysis();
+}
 
 function getSidebarHtml() {
   return `<!DOCTYPE html>
