@@ -24,6 +24,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Add Industry Columns (run once)', 'addIndustryHeaders')
     .addItem('🏭 Classify Missing Industries', 'classifyMissingIndustries')
+    .addItem('🏭 Force Reclassify All Industries', 'forceReclassifyAllIndustries')
     .addToUi();
 }
 
@@ -742,6 +743,30 @@ function addIndustryHeaders() {
     '"Main Industry" and "Niche Industry" columns added after "Category".\n\n' +
     'Run "🏭 Classify Missing Industries" from the menu to backfill existing rows.'
   );
+}
+
+// Clear all industry columns and reclassify every row from scratch.
+function forceReclassifyAllIndustries() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheets()[0];
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 2) { SpreadsheetApp.getUi().alert('No data rows found.'); return; }
+
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var mainCol  = headers.indexOf('Main Industry');
+  var nicheCol = headers.indexOf('Niche Industry');
+
+  if (mainCol === -1 && nicheCol === -1) {
+    SpreadsheetApp.getUi().alert('Industry columns not found.\n\nRun "Add Industry Columns (run once)" first.');
+    return;
+  }
+
+  // Clear all existing values in those columns (data rows only)
+  if (mainCol  !== -1) sheet.getRange(2, mainCol  + 1, lastRow - 1, 1).clearContent();
+  if (nicheCol !== -1) sheet.getRange(2, nicheCol + 1, lastRow - 1, 1).clearContent();
+
+  // Now run the normal backfill (all rows are now blank)
+  classifyMissingIndustries();
 }
 
 // Backfill industry classification for all rows where both columns are blank.
