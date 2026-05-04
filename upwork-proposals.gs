@@ -697,13 +697,15 @@ function classifyIndustry_(title, category, skills) {
   var snippet = 'Job Title: ' + title + '\nCategory: ' + category + '\nSkills: ' + String(skills || '').substring(0, 200);
   var prompt =
     'Classify this Upwork job into two fields.\n\n' +
-    'MAIN_INDUSTRY: Identify the END CLIENT\'S industry — the type of business or sector that hired this freelancer. ' +
+    'MAIN_INDUSTRY: Identify the END CLIENT\'S industry — the sector or business type that hired this freelancer. ' +
     'Pick exactly one from this list: SaaS / Software, E-commerce / DTC, Coaching / Consulting, Real Estate, Healthcare / Wellness, Recruitment / Staffing, Marketing Agency, Fintech / Finance, Legal, Local Services, E-learning / Education, Non-profit\n' +
-    'IMPORTANT: If the job post is about cold email, outreach, lead gen, email marketing, or similar services WITHOUT specifying what industry the client is in — output N/A. ' +
-    'Do NOT use "Marketing Agency" just because the job involves marketing. Only use it if the client is actually a marketing agency hiring for their own business.\n\n' +
-    'NICHE_INDUSTRY: Write a 2-5 word description of the specific sub-market or client type being targeted (e.g. "TikTok Shop sellers", "Home service franchise operators", "B2B SaaS trial conversion", "Personal injury law firms"). ' +
-    'This must describe WHO the client serves or WHO the client is — not the service being performed. ' +
-    'If the job post gives no clue about the target industry or client type, output N/A.\n\n' +
+    'Rules:\n' +
+    '- Output N/A ONLY if the job gives zero signal about what industry the client is in.\n' +
+    '- Do NOT default to "Marketing Agency" just because the work involves cold email or outreach — that describes the service, not the client.\n' +
+    '- If you can identify a Niche Industry, you MUST also pick a Main Industry (never N/A when a niche is known).\n\n' +
+    'NICHE_INDUSTRY: Write a 2-5 word description of the specific sub-market or client type (e.g. "TikTok Shop sellers", "Home service franchises", "B2B SaaS trial conversion", "Personal injury law firms"). ' +
+    'Describe WHO the client is or WHO they serve — not the service being performed. ' +
+    'Output N/A if the job post gives no clue about the target industry or client type.\n\n' +
     'Reply in exactly this format:\n' +
     'MAIN: [value or N/A]\n' +
     'NICHE: [value or N/A]\n\n' +
