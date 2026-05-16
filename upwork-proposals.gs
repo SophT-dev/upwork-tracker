@@ -20,6 +20,7 @@ function onOpen() {
     .addItem('⚙️ Set Recent Count', 'setRecentCount')
     .addSeparator()
     .addItem('🎣 Build Hook Analysis', 'buildHookAnalysis')
+    .addItem('🎣 Add New Hooks', 'addNewHooks')
     .addItem('🎣 Force Re-cluster All', 'forceReclusterAll')
     .addSeparator()
     .addItem('Add Industry Columns (run once)', 'addIndustryHeaders')
@@ -1432,28 +1433,11 @@ hookLines.join('\n---\n');
   // Merge new results into existingClusters for writing
   Object.keys(hookResults).forEach(function(n) { existingClusters[parseInt(n)] = hookResults[parseInt(n)].cluster; });
 
-  // ── Build the full output array (15 cols) ──
+  // ── Pre-pass: load existing hook rows + build clusterStats BEFORE output ──
   var COLS = 19;
   var pad = function(arr) { while (arr.length < COLS) arr.push(''); return arr; };
 
-  var output = [];
-
-  // Taxonomy section
-  output.push(pad(['HOOK TAXONOMY — edit cluster names here; changes reflect in cluster summary below']));
-  output.push(pad(['Cluster Name', 'Template Pattern']));
-  Object.keys(clusters).forEach(function(name) { output.push(pad([name, clusters[name]])); });
-  output.push(pad([])); // spacer
-
-  // Hook rows header
-  output.push(pad(['#', 'Date', 'Job Title', 'Hook', 'Proposal (preview)', 'Source URL',
-    'Hook Template', 'Template Pattern', 'Unfair Advantages', 'Clean?',
-    'Invite?', 'Viewed?', 'Replied?', 'Closed?', 'Score', 'Verdict',
-    'Template Total', 'Template Views', 'Template View%']));
-
-  var headerDataRow = output.length; // for formatting (1-based later)
-
-  // Merge old + new hook data for writing
-  // Build a lookup of all existing hook rows if tab already exists
+  // Load existing hook rows from tab (for incremental mode)
   var existingRows = {}; // rowNum -> full row array
   if (hookTab) {
     var ev = hookTab.getDataRange().getValues();
@@ -1469,7 +1453,7 @@ hookLines.join('\n---\n');
     }
   }
 
-  // Pass 1 — build clusterStats + collect row data (rows not written yet)
+  // Pass 1 — build clusterStats + collect row data
   var clusterStats = {};
   var hookRowData = [];
 
@@ -1490,9 +1474,10 @@ hookLines.join('\n---\n');
       verdict    = result.verdict;
     } else if (existingRows[num]) {
       cluster    = String(existingRows[num][6] || '');
-      advantages = String(existingRows[num][8] || '');
-      score      = String(existingRows[num][13] || '');
-      verdict    = String(existingRows[num][14] || '');
+      // Strip stored Invite flag — re-added fresh from proposals sheet below
+      advantages = String(existingRows[num][8] || '').replace(/^Invite(,\s*)?/i, '').trim();
+      score      = String(existingRows[num][14] || '');  // col 15 = Score (0-indexed 14)
+      verdict    = String(existingRows[num][15] || '');  // col 16 = Verdict (0-indexed 15)
     }
 
     var invite = inviteIdx !== undefined ? String(r[inviteIdx] || '').toLowerCase() === 'yes' : false;
@@ -1518,7 +1503,7 @@ hookLines.join('\n---\n');
       inviteVal: inviteVal, viewed: viewed, replied: replied, closed: closed, score: score, verdict: verdict });
 
     if (!cluster) continue;
-    if (!clusterStats[cluster]) clusterStats[cluster] = { count: 0, cleanCount: 0, rawViewed: 0, cleanViewed: 0, replied: 0, closed: 0, totalScore: 0, scoreCount: 0 };
+    if (!clusterStats[cluster]) clusterStats[cluster] = { count: 0, cleanCount: 0, rawViewed: 0, cleanViewed: 0, replied: 0, closed: 0, totalScore: 0, scoreCount: 0, inviteCount: 0, uaCount: 0 };
     var s = clusterStats[cluster];
     var isViewed  = String(viewed).toLowerCase() === 'yes';
     var isReplied = String(replied).toLowerCase() === 'yes';
@@ -1533,7 +1518,50 @@ hookLines.join('\n---\n');
       s.cleanCount++;
       s.cleanViewed += isViewed ? 1 : 0;
     }
+    var hasInvite = advantages.indexOf('Invite') !== -1;
+    var hasUA = advantages.replace(/Invite,?\s*/g, '').trim() !== '';
+    s.inviteCount += hasInvite ? 1 : 0;
+    s.uaCount     += hasUA ? 1 : 0;
   }
+
+  // ── Build output array: dashboard first, then hook rows ──
+  var output = [];
+  var fmt = function(n, d) { return d > 0 ? (n / d * 100).toFixed(0) + '%' : '—'; };
+
+  // Dashboard section
+  output.push(pad(['HOOK DASHBOARD — sorted by Clean View%  |  ' +
+    hookRowData.length + ' proposals  |  Run "Build Hook Analysis" to refresh']));
+  output.push(pad(['Cluster Name', 'Template Pattern', 'Count', 'Views',
+    'Raw View%', 'Clean View%', 'Invite #', 'UA #',
+    'Reply%', 'Close%', 'Avg Score', 'Note']));
+
+  var sortedClusters = Object.keys(clusters).sort(function(a, b) {
+    var sa = clusterStats[a], sb = clusterStats[b];
+    var pa = sa && sa.cleanCount > 0 ? sa.cleanViewed / sa.cleanCount : -1;
+    var pb = sb && sb.cleanCount > 0 ? sb.cleanViewed / sb.cleanCount : -1;
+    return pb - pa;
+  });
+
+  sortedClusters.forEach(function(name) {
+    var s = clusterStats[name] || { count:0, rawViewed:0, cleanViewed:0, cleanCount:0, replied:0, closed:0, totalScore:0, scoreCount:0, inviteCount:0, uaCount:0 };
+    var avgScore = s.scoreCount > 0 ? (s.totalScore / s.scoreCount).toFixed(1) : '—';
+    output.push(pad([name, clusters[name],
+      s.count, s.rawViewed,
+      fmt(s.rawViewed, s.count), fmt(s.cleanViewed, s.cleanCount),
+      s.inviteCount, s.uaCount,
+      fmt(s.replied, s.count), fmt(s.closed, s.count),
+      avgScore, computeNote_(s)
+    ]));
+  });
+  output.push(pad([])); // spacer
+
+  // Hook rows header
+  output.push(pad(['#', 'Date', 'Job Title', 'Hook', 'Proposal (preview)', 'Source URL',
+    'Hook Template', 'Template Pattern', 'Unfair Advantages', 'Clean?',
+    'Invite?', 'Viewed?', 'Replied?', 'Closed?', 'Score', 'Verdict',
+    'Template Total', 'Template Views', 'Template View%']));
+
+  var headerDataRow = output.length; // 1-based index of hook header row
 
   // Pass 2 — write hook rows now that clusterStats is fully built
   for (var j = 0; j < hookRowData.length; j++) {
@@ -1546,24 +1574,6 @@ hookLines.join('\n---\n');
       cs.count, cs.rawViewed, tmplViewPct]);
   }
 
-  // Spacer + cluster summary
-  output.push(pad([]));
-  output.push(pad(['CLUSTER SUMMARY']));
-  output.push(pad(['Cluster', 'Count', 'Clean Count', 'Raw View%', 'Clean View%', 'Reply%', 'Close%', 'Avg Score']));
-
-  var summaryRows = Object.keys(clusterStats).map(function(c) {
-    var s = clusterStats[c];
-    var fmt = function(n, d) { return d > 0 ? (n / d * 100).toFixed(0) + '%' : '—'; };
-    var avgScore = s.scoreCount > 0 ? (s.totalScore / s.scoreCount).toFixed(1) : '—';
-    return [c, s.count, s.cleanCount, fmt(s.rawViewed, s.count), fmt(s.cleanViewed, s.cleanCount), fmt(s.replied, s.count), fmt(s.closed, s.count), avgScore];
-  });
-  summaryRows.sort(function(a, b) {
-    var av = a[4] === '—' ? -1 : parseInt(a[4]);
-    var bv = b[4] === '—' ? -1 : parseInt(b[4]);
-    return bv - av;
-  });
-  summaryRows.forEach(function(row) { output.push(pad(row)); });
-
   // ── Write to sheet ──
   if (!hookTab) hookTab = ss.insertSheet('🎣 Hooks', 1);
   hookTab.clearContents();
@@ -1573,9 +1583,18 @@ hookLines.join('\n---\n');
   // ── Formatting ──
   var green = '#14a800', white = '#ffffff', lightGreen = '#e8f5e9', gray = '#f5f5f5';
 
-  // Taxonomy header
+  // Dashboard title row
   hookTab.getRange(1, 1, 1, COLS).setBackground(green).setFontColor(white).setFontWeight('bold');
-  hookTab.getRange(2, 1, 1, 2).setBackground(lightGreen).setFontWeight('bold');
+  // Dashboard column headers row
+  hookTab.getRange(2, 1, 1, 12).setBackground(lightGreen).setFontWeight('bold');
+  // Dashboard cluster data rows (alternating, 40px height, Note col wraps)
+  var dashDataStart = 3;
+  var dashDataEnd = dashDataStart + sortedClusters.length - 1;
+  for (var ri = dashDataStart; ri <= dashDataEnd; ri++) {
+    hookTab.getRange(ri, 1, 1, COLS).setBackground(ri % 2 === 0 ? gray : white);
+  }
+  hookTab.setRowHeightsForced(dashDataStart, sortedClusters.length, 40);
+  hookTab.getRange(dashDataStart, 12, sortedClusters.length, 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
 
   // Hook rows header
   var hdrRow = headerDataRow;
@@ -1589,31 +1608,26 @@ hookLines.join('\n---\n');
     hookTab.getRange(ri, 1, 1, COLS).setBackground(ri % 2 === 0 ? gray : white);
   }
 
-  // Cluster summary header
-  var summaryTitleRow = dataEnd + 2;
-  hookTab.getRange(summaryTitleRow, 1, 1, COLS).setBackground(green).setFontColor(white).setFontWeight('bold');
-  hookTab.getRange(summaryTitleRow + 1, 1, 1, COLS).setBackground(lightGreen).setFontWeight('bold');
-
-  // Column widths
-  hookTab.setColumnWidth(1, 35);   // #
-  hookTab.setColumnWidth(2, 80);   // Date
-  hookTab.setColumnWidth(3, 200);  // Job Title
-  hookTab.setColumnWidth(4, 420);  // Hook
-  hookTab.setColumnWidth(5, 80);   // Proposal preview (hidden from view, used by Claude)
-  hookTab.setColumnWidth(6, 100);  // URL
-  hookTab.setColumnWidth(7, 150);  // Hook Template
-  hookTab.setColumnWidth(8, 300);  // Template Pattern
-  hookTab.setColumnWidth(9, 160);  // Advantages
-  hookTab.setColumnWidth(10, 60);  // Clean?
-  hookTab.setColumnWidth(11, 60);  // Invite?
-  hookTab.setColumnWidth(12, 65);  // Viewed?
-  hookTab.setColumnWidth(13, 65);  // Replied?
-  hookTab.setColumnWidth(14, 60);  // Closed?
-  hookTab.setColumnWidth(15, 55);  // Score
-  hookTab.setColumnWidth(16, 320); // Verdict
-  hookTab.setColumnWidth(17, 110); // Template Total
-  hookTab.setColumnWidth(18, 110); // Template Views
-  hookTab.setColumnWidth(19, 110); // Template View%
+  // Column widths (shared by dashboard + hook rows)
+  hookTab.setColumnWidth(1, 140);  // Cluster Name / #
+  hookTab.setColumnWidth(2, 300);  // Template Pattern / Date
+  hookTab.setColumnWidth(3, 200);  // Count / Job Title
+  hookTab.setColumnWidth(4, 420);  // Views / Hook
+  hookTab.setColumnWidth(5, 80);   // Raw View% / Proposal preview
+  hookTab.setColumnWidth(6, 100);  // Clean View% / Source URL
+  hookTab.setColumnWidth(7, 150);  // Invite # / Hook Template
+  hookTab.setColumnWidth(8, 300);  // UA # / Template Pattern
+  hookTab.setColumnWidth(9, 160);  // Reply% / Unfair Advantages
+  hookTab.setColumnWidth(10, 65);  // Close% / Clean?
+  hookTab.setColumnWidth(11, 70);  // Avg Score / Invite?
+  hookTab.setColumnWidth(12, 220); // Note / Viewed?
+  hookTab.setColumnWidth(13, 65);  // — / Replied?
+  hookTab.setColumnWidth(14, 60);  // — / Closed?
+  hookTab.setColumnWidth(15, 55);  // — / Score
+  hookTab.setColumnWidth(16, 320); // — / Verdict
+  hookTab.setColumnWidth(17, 110); // — / Template Total
+  hookTab.setColumnWidth(18, 110); // — / Template Views
+  hookTab.setColumnWidth(19, 110); // — / Template View%
 
   // Wrap: Hook (D), Template Pattern (H), Verdict (P) — Proposal preview (E) stays clipped
   [4, 8, 16].forEach(function(col) {
@@ -1630,6 +1644,313 @@ function forceReclusterAll() {
   var hookTab = ss.getSheetByName('🎣 Hooks');
   if (hookTab) hookTab.clearContents();
   buildHookAnalysis();
+}
+
+function addNewHooks() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var hookTab = ss.getSheetByName('🎣 Hooks');
+  if (!hookTab) {
+    SpreadsheetApp.getUi().alert('No 🎣 Hooks tab found. Run "Build Hook Analysis" first.');
+    return;
+  }
+
+  var key = PropertiesService.getScriptProperties().getProperty('ANTHROPIC_API_KEY');
+  if (!key) {
+    SpreadsheetApp.getUi().alert('Missing API key.\n\nGo to Extensions → Apps Script → Project Settings → Script Properties\nand add: ANTHROPIC_API_KEY = your key');
+    return;
+  }
+
+  // ── Read existing taxonomy from top dashboard ──
+  var tabVals = hookTab.getDataRange().getValues();
+  var clusters = {}; // name -> pattern
+  // Row 0 = title, Row 1 = col headers, Rows 2+ = cluster data until blank row
+  for (var ti = 2; ti < tabVals.length; ti++) {
+    var cName = String(tabVals[ti][0] || '').trim();
+    if (!cName) break;
+    clusters[cName] = String(tabVals[ti][1] || '').trim();
+  }
+  if (Object.keys(clusters).length === 0) {
+    SpreadsheetApp.getUi().alert('Could not read cluster taxonomy from the Hooks tab.\nTry "Force Re-cluster All" to rebuild from scratch.');
+    return;
+  }
+
+  // ── Read existing hook assignments from below the "#" header row ──
+  var existingClusters = {};  // rowNum -> cluster label
+  var existingFullRows = {};  // rowNum -> full row array
+  var hdrRowIdx = -1;
+  for (var hi = 0; hi < tabVals.length; hi++) {
+    if (String(tabVals[hi][0]) === '#') { hdrRowIdx = hi; break; }
+  }
+  if (hdrRowIdx !== -1) {
+    for (var hi2 = hdrRowIdx + 1; hi2 < tabVals.length; hi2++) {
+      var rn = parseInt(tabVals[hi2][0]);
+      if (!isNaN(rn) && rn > 0) {
+        existingClusters[rn] = String(tabVals[hi2][6] || '').trim();
+        existingFullRows[rn] = tabVals[hi2];
+      }
+    }
+  }
+
+  // ── Load proposal data ──
+  var d = loadData_();
+  var rows = d.rows, colIdx = d.colIdx;
+  if (rows.length === 0) { SpreadsheetApp.getUi().alert('No proposal data found.'); return; }
+
+  var hookIdx       = colIdx['Hook'];
+  var proposalIdx   = colIdx['Proposal Sent'];
+  var jobTitleIdx   = colIdx['Job Title'];
+  var clientNameIdx = colIdx['Client Name'];
+  var companyIdx    = colIdx['Company'];
+  var inviteIdx     = colIdx['Invite?'];
+  var boostIdx      = colIdx['Boost Connects'];
+  var viewedIdx     = colIdx['Viewed?'];
+  var repliedIdx    = colIdx['Replied?'];
+  var closedIdx     = colIdx['Closed?'];
+  var urlIdx        = colIdx['Source URL'];
+  var dateIdx       = colIdx['Date'];
+
+  // ── Find unassigned rows ──
+  var toAnalyze = [];
+  for (var i = 0; i < rows.length; i++) {
+    var num = i + 1;
+    var hook = hookIdx !== undefined ? String(rows[i][hookIdx] || '').trim() : '';
+    if (hook && !existingClusters[num]) toAnalyze.push({ num: num, row: rows[i] });
+  }
+  if (toAnalyze.length === 0) {
+    SpreadsheetApp.getUi().alert('No new hooks found — all proposals already have cluster assignments.\n\nUse "Force Re-cluster All" to rebuild from scratch.');
+    return;
+  }
+
+  SpreadsheetApp.getActiveSpreadsheet().toast('Sending ' + toAnalyze.length + ' new hooks to Claude...', '🎣 Add New Hooks', 90);
+
+  // ── Claude prompt: assignment only (no taxonomy definition needed) ──
+  var taxonomyLines = Object.keys(clusters).map(function(name) {
+    return name + ' | ' + clusters[name];
+  }).join('\n');
+
+  var hookLines = toAnalyze.map(function(item) {
+    var r = item.row;
+    var hook     = hookIdx !== undefined       ? String(r[hookIdx] || '').substring(0, 231) : '';
+    var proposal = proposalIdx !== undefined   ? String(r[proposalIdx] || '').substring(0, 200) : '';
+    var title    = jobTitleIdx !== undefined   ? String(r[jobTitleIdx] || '') : '';
+    var client   = clientNameIdx !== undefined ? String(r[clientNameIdx] || '') : '';
+    var company  = companyIdx !== undefined    ? String(r[companyIdx] || '') : '';
+    var invite   = inviteIdx !== undefined     ? (String(r[inviteIdx] || '').toLowerCase() === 'yes' ? 'Yes' : 'No') : 'No';
+    var boosted  = boostIdx !== undefined      ? (parseFloat(r[boostIdx]) > 0 ? 'Yes' : 'No') : 'No';
+    return '#' + item.num + ' | Title: ' + title + ' | Client: ' + client + ' | Company: ' + company +
+      ' | Invite: ' + invite + ' | Boosted: ' + boosted + '\nHook: ' + hook + '\nProposal preview: ' + proposal;
+  });
+
+  var prompt =
+'You are assigning ' + hookLines.length + ' new Upwork proposal hooks to existing hook clusters.\n\n' +
+'EXISTING TAXONOMY — assign each hook to the closest matching cluster.\n' +
+'If a hook does not fit any cluster well, assign it to the cluster it most loosely resembles.\n\n' +
+taxonomyLines + '\n\n' +
+'UNFAIR ADVANTAGE DEFINITIONS (do NOT include Invite — tracked separately):\n' +
+'- Keyword: hook includes a specific word the client explicitly asked for\n' +
+'- Name: client\'s first name appears in the hook\n' +
+'- Company: client\'s company name appears in the hook (cross-reference the Company field)\n' +
+'- Industry Specific: hook shows specific niche knowledge not generic to all cold email jobs\n' +
+'- Job Specific: hook relies on unusual details unique to this exact job post\n\n' +
+'SCORING 1-10: Would this hook make a busy client click "read more" from a list of 30 proposals?\n' +
+'Use the proposal preview to judge whether the hook was well-matched to the specific job.\n\n' +
+'OUTPUT — follow this format exactly, no extra text:\n\n' +
+'HOOKS:\n' +
+'#N | ClusterName | Advantage1,Advantage2 or None | score | one-line verdict\n' +
+'(one line per hook, pipe-separated)\n\n' +
+'HOOK DATA:\n' +
+hookLines.join('\n---\n');
+
+  var response = callClaude_(key, prompt, 4000);
+  if (!response) { SpreadsheetApp.getUi().alert('Claude API error. Check your API key and try again.'); return; }
+
+  // ── Parse new assignments ──
+  var newHookResults = {};
+  var hooksMatch = response.match(/HOOKS:\n([\s\S]*?)(?:\n\nHOOK DATA:|$)/);
+  if (hooksMatch) {
+    hooksMatch[1].trim().split('\n').forEach(function(line) {
+      var parts = line.split('|');
+      if (parts.length >= 5) {
+        var num = parseInt(parts[0].replace('#', '').trim());
+        if (!isNaN(num)) {
+          newHookResults[num] = {
+            cluster:    parts[1].trim(),
+            advantages: parts[2].trim() === 'None' ? '' : parts[2].trim(),
+            score:      parts[3].trim(),
+            verdict:    parts.slice(4).join('|').trim()
+          };
+        }
+      }
+    });
+  }
+
+  // ── Pass 1: rebuild clusterStats + hookRowData across ALL rows ──
+  var COLS = 19;
+  var pad = function(arr) { while (arr.length < COLS) arr.push(''); return arr; };
+  var fmt = function(n, d) { return d > 0 ? (n / d * 100).toFixed(0) + '%' : '—'; };
+  var clusterStats = {};
+  var hookRowData = [];
+
+  for (var i = 0; i < rows.length; i++) {
+    var r   = rows[i];
+    var num = i + 1;
+    var result = newHookResults[num];
+    var existingFull = existingFullRows[num];
+
+    var cluster = '', advantages = '', score = '', verdict = '';
+
+    if (result) {
+      cluster    = result.cluster;
+      advantages = result.advantages;
+      score      = result.score;
+      verdict    = result.verdict;
+    } else if (existingFull) {
+      cluster    = String(existingFull[6] || '');
+      // Strip stored Invite flag — re-added fresh from proposals sheet below
+      advantages = String(existingFull[8] || '').replace(/^Invite(,\s*)?/i, '').trim();
+      score      = String(existingFull[14] || '');
+      verdict    = String(existingFull[15] || '');
+    }
+
+    var invite = inviteIdx !== undefined ? String(r[inviteIdx] || '').toLowerCase() === 'yes' : false;
+    if (invite && advantages) advantages = 'Invite, ' + advantages;
+    else if (invite) advantages = 'Invite';
+    var clean = advantages === '' ? 'Yes' : 'No';
+    var clusterPattern = clusters[cluster] || (existingFull ? String(existingFull[7] || '') : '');
+
+    var hook      = hookIdx !== undefined     ? String(r[hookIdx] || '').substring(0, 231) : '';
+    var proposal  = proposalIdx !== undefined ? String(r[proposalIdx] || '').substring(0, 300) : '';
+    var url       = urlIdx !== undefined      ? r[urlIdx] : '';
+    var title     = jobTitleIdx !== undefined ? r[jobTitleIdx] : '';
+    var date      = dateIdx !== undefined     ? r[dateIdx] : '';
+    var inviteVal = inviteIdx !== undefined   ? String(r[inviteIdx] || '') : '';
+    var viewed    = viewedIdx !== undefined   ? r[viewedIdx] : '';
+    var replied   = repliedIdx !== undefined  ? r[repliedIdx] : '';
+    var closed    = closedIdx !== undefined   ? r[closedIdx] : '';
+
+    if (!hook) continue;
+
+    hookRowData.push({ num: num, date: date, title: title, hook: hook, proposal: proposal, url: url,
+      cluster: cluster, clusterPattern: clusterPattern, advantages: advantages, clean: clean,
+      inviteVal: inviteVal, viewed: viewed, replied: replied, closed: closed, score: score, verdict: verdict });
+
+    if (!cluster) continue;
+    if (!clusterStats[cluster]) clusterStats[cluster] = { count: 0, cleanCount: 0, rawViewed: 0, cleanViewed: 0, replied: 0, closed: 0, totalScore: 0, scoreCount: 0, inviteCount: 0, uaCount: 0 };
+    var s = clusterStats[cluster];
+    var isViewed  = String(viewed).toLowerCase() === 'yes';
+    var isReplied = String(replied).toLowerCase() === 'yes';
+    var isClosed  = String(closed).toLowerCase() === 'yes';
+    var scoreNum  = parseFloat(score) || 0;
+    s.count++;
+    s.rawViewed += isViewed ? 1 : 0;
+    s.replied   += isReplied ? 1 : 0;
+    s.closed    += isClosed ? 1 : 0;
+    if (scoreNum > 0) { s.totalScore += scoreNum; s.scoreCount++; }
+    if (clean === 'Yes') { s.cleanCount++; s.cleanViewed += isViewed ? 1 : 0; }
+    var hasInvite = advantages.indexOf('Invite') !== -1;
+    var hasUA = advantages.replace(/Invite,?\s*/g, '').trim() !== '';
+    s.inviteCount += hasInvite ? 1 : 0;
+    s.uaCount     += hasUA ? 1 : 0;
+  }
+
+  // ── Build output ──
+  var output = [];
+  var sortedClusters = Object.keys(clusters).sort(function(a, b) {
+    var sa = clusterStats[a], sb = clusterStats[b];
+    var pa = sa && sa.cleanCount > 0 ? sa.cleanViewed / sa.cleanCount : -1;
+    var pb = sb && sb.cleanCount > 0 ? sb.cleanViewed / sb.cleanCount : -1;
+    return pb - pa;
+  });
+
+  output.push(pad(['HOOK DASHBOARD — sorted by Clean View%  |  ' +
+    hookRowData.length + ' proposals  |  Run "Build Hook Analysis" to refresh']));
+  output.push(pad(['Cluster Name', 'Template Pattern', 'Count', 'Views',
+    'Raw View%', 'Clean View%', 'Invite #', 'UA #',
+    'Reply%', 'Close%', 'Avg Score', 'Note']));
+  sortedClusters.forEach(function(name) {
+    var s = clusterStats[name] || { count:0, rawViewed:0, cleanViewed:0, cleanCount:0, replied:0, closed:0, totalScore:0, scoreCount:0, inviteCount:0, uaCount:0 };
+    var avgScore = s.scoreCount > 0 ? (s.totalScore / s.scoreCount).toFixed(1) : '—';
+    output.push(pad([name, clusters[name],
+      s.count, s.rawViewed,
+      fmt(s.rawViewed, s.count), fmt(s.cleanViewed, s.cleanCount),
+      s.inviteCount, s.uaCount,
+      fmt(s.replied, s.count), fmt(s.closed, s.count),
+      avgScore, computeNote_(s)
+    ]));
+  });
+  output.push(pad([]));
+
+  output.push(pad(['#', 'Date', 'Job Title', 'Hook', 'Proposal (preview)', 'Source URL',
+    'Hook Template', 'Template Pattern', 'Unfair Advantages', 'Clean?',
+    'Invite?', 'Viewed?', 'Replied?', 'Closed?', 'Score', 'Verdict',
+    'Template Total', 'Template Views', 'Template View%']));
+  var headerDataRow = output.length;
+
+  for (var j = 0; j < hookRowData.length; j++) {
+    var hd = hookRowData[j];
+    var cs = clusterStats[hd.cluster] || { count: 0, rawViewed: 0 };
+    var tmplViewPct = cs.count > 0 ? (cs.rawViewed / cs.count * 100).toFixed(0) + '%' : '—';
+    output.push([hd.num, hd.date, hd.title, hd.hook, hd.proposal, hd.url,
+      hd.cluster, hd.clusterPattern, hd.advantages, hd.clean,
+      hd.inviteVal, hd.viewed, hd.replied, hd.closed, hd.score, hd.verdict,
+      cs.count, cs.rawViewed, tmplViewPct]);
+  }
+
+  // ── Write + format ──
+  hookTab.clearContents();
+  hookTab.clearFormats();
+  hookTab.getRange(1, 1, output.length, COLS).setValues(output);
+
+  var green = '#14a800', white = '#ffffff', lightGreen = '#e8f5e9', gray = '#f5f5f5';
+  hookTab.getRange(1, 1, 1, COLS).setBackground(green).setFontColor(white).setFontWeight('bold');
+  hookTab.getRange(2, 1, 1, 12).setBackground(lightGreen).setFontWeight('bold');
+  var dashDataStart = 3, dashDataEnd = dashDataStart + sortedClusters.length - 1;
+  for (var ri = dashDataStart; ri <= dashDataEnd; ri++) {
+    hookTab.getRange(ri, 1, 1, COLS).setBackground(ri % 2 === 0 ? gray : white);
+  }
+  hookTab.setRowHeightsForced(dashDataStart, sortedClusters.length, 40);
+  hookTab.getRange(dashDataStart, 12, sortedClusters.length, 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+  var hdrRow = headerDataRow;
+  hookTab.getRange(hdrRow, 1, 1, COLS).setBackground(green).setFontColor(white).setFontWeight('bold');
+  hookTab.setFrozenRows(hdrRow);
+  var dataStart = hdrRow + 1, dataEnd = dataStart + hookRowData.length - 1;
+  for (var ri = dataStart; ri <= dataEnd; ri++) {
+    hookTab.getRange(ri, 1, 1, COLS).setBackground(ri % 2 === 0 ? gray : white);
+  }
+  hookTab.setColumnWidth(1, 140);  hookTab.setColumnWidth(2, 300);  hookTab.setColumnWidth(3, 200);
+  hookTab.setColumnWidth(4, 420);  hookTab.setColumnWidth(5, 80);   hookTab.setColumnWidth(6, 100);
+  hookTab.setColumnWidth(7, 150);  hookTab.setColumnWidth(8, 300);  hookTab.setColumnWidth(9, 160);
+  hookTab.setColumnWidth(10, 65);  hookTab.setColumnWidth(11, 70);  hookTab.setColumnWidth(12, 220);
+  hookTab.setColumnWidth(13, 65);  hookTab.setColumnWidth(14, 60);  hookTab.setColumnWidth(15, 55);
+  hookTab.setColumnWidth(16, 320); hookTab.setColumnWidth(17, 110); hookTab.setColumnWidth(18, 110);
+  hookTab.setColumnWidth(19, 110);
+  [4, 8, 16].forEach(function(col) {
+    hookTab.getRange(dataStart, col, hookRowData.length, 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
+  });
+  hookTab.setRowHeightsForced(dataStart, hookRowData.length, 110);
+
+  SpreadsheetApp.getActiveSpreadsheet().setActiveSheet(hookTab);
+  SpreadsheetApp.getActiveSpreadsheet().toast('Done! ' + toAnalyze.length + ' new hooks added. Dashboard updated.', '🎣 Add New Hooks', 5);
+}
+
+function computeNote_(s) {
+  var notes = [];
+  var fmt = function(n, d) { return d > 0 ? (n / d * 100).toFixed(0) + '%' : '—'; };
+  if (s.count < 2) return 'only ' + s.count + ' proposal';
+  if (s.inviteCount / s.count > 0.5)
+    notes.push(s.inviteCount + '/' + s.count + ' were invites — check clean rate');
+  if (s.uaCount / s.count > 0.5)
+    notes.push('most had unfair advantages (' + s.uaCount + '/' + s.count + ')');
+  if (s.cleanCount < 3)
+    notes.push('small clean sample (n=' + s.cleanCount + ')');
+  else {
+    var cleanViewPct = s.cleanViewed / s.cleanCount;
+    if (cleanViewPct >= 0.4)
+      notes.push('strong clean performance (' + fmt(s.cleanViewed, s.cleanCount) + ')');
+    else if (cleanViewPct <= 0.1 && s.cleanCount >= 5)
+      notes.push('low clean view rate (' + fmt(s.cleanViewed, s.cleanCount) + ')');
+  }
+  return notes.length > 0 ? notes.join('; ') : '—';
 }
 
 function getSidebarHtml() {

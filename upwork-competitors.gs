@@ -10,10 +10,143 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Competitors')
     .addItem('Setup Profiles Sheet', 'setupCompetitorHeaders')
+    .addItem('Add Missing Columns (run once)', 'addMissingCompetitorColumns')
     .addSeparator()
     .addItem('🤖 Analyze Competitors', 'analyzeCompetitors')
     .addItem('🗑️ Clear Analysis', 'clearAnalysis')
     .addToUi();
+}
+
+// Run this ONCE on an existing sheet to insert Total Hours + Agency
+// without destroying any existing data.
+function addMissingCompetitorColumns() {
+  var sheet = getOrCreateProfileSheet_();
+  var lastCol = sheet.getLastColumn();
+  if (lastCol < 1) {
+    SpreadsheetApp.getUi().alert('Sheet has no headers yet. Run "Setup Profiles Sheet" first.');
+    return;
+  }
+
+  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+
+  function headerStyle(cell) {
+    cell.setFontWeight('bold').setBackground('#14a800').setFontColor('#ffffff');
+  }
+
+  var added = [];
+
+  // ── Insert "Total Hours" after "Total Earnings" ──────────
+  if (headers.indexOf('Total Hours') === -1) {
+    var earnIdx = headers.indexOf('Total Earnings');
+    if (earnIdx === -1) {
+      SpreadsheetApp.getUi().alert('Cannot find "Total Earnings" column. Make sure your header row is set up.');
+      return;
+    }
+    var insertAt = earnIdx + 2; // 1-indexed, insert AFTER Total Earnings
+    sheet.insertColumnAfter(earnIdx + 1);
+    var cell = sheet.getRange(1, insertAt);
+    cell.setValue('Total Hours');
+    headerStyle(cell);
+    sheet.setColumnWidth(insertAt, 80);
+    // Re-read headers after insertion
+    lastCol = sheet.getLastColumn();
+    headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    added.push('Total Hours');
+  }
+
+  // ── Insert "Agency" after "Total Jobs" ───────────────────
+  if (headers.indexOf('Agency') === -1) {
+    var jobsIdx = headers.indexOf('Total Jobs');
+    if (jobsIdx === -1) {
+      SpreadsheetApp.getUi().alert('Cannot find "Total Jobs" column.');
+      return;
+    }
+    var insertAt2 = jobsIdx + 2;
+    sheet.insertColumnAfter(jobsIdx + 1);
+    var cell2 = sheet.getRange(1, insertAt2);
+    cell2.setValue('Agency');
+    headerStyle(cell2);
+    sheet.setColumnWidth(insertAt2, 120);
+    lastCol = sheet.getLastColumn();
+    headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    added.push('Agency');
+  }
+
+  // ── Insert "Earn/Job" after "Agency" ─────────────────────
+  if (headers.indexOf('Earn/Job') === -1) {
+    var agIdx = headers.indexOf('Agency');
+    if (agIdx === -1) {
+      SpreadsheetApp.getUi().alert('Cannot find "Agency" column.');
+      return;
+    }
+    var insertAt3 = agIdx + 2;
+    sheet.insertColumnAfter(agIdx + 1);
+    var cell3 = sheet.getRange(1, insertAt3);
+    cell3.setValue('Earn/Job');
+    headerStyle(cell3);
+    sheet.setColumnWidth(insertAt3, 80);
+    lastCol = sheet.getLastColumn();
+    headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    added.push('Earn/Job');
+  }
+
+  // ── Insert "Earn/Hr" after "Earn/Job" ────────────────────
+  if (headers.indexOf('Earn/Hr') === -1) {
+    var ejIdx = headers.indexOf('Earn/Job');
+    if (ejIdx === -1) {
+      SpreadsheetApp.getUi().alert('Cannot find "Earn/Job" column.');
+      return;
+    }
+    var insertAt4 = ejIdx + 2;
+    sheet.insertColumnAfter(ejIdx + 1);
+    var cell4 = sheet.getRange(1, insertAt4);
+    cell4.setValue('Earn/Hr');
+    headerStyle(cell4);
+    sheet.setColumnWidth(insertAt4, 80);
+    lastCol = sheet.getLastColumn();
+    headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    added.push('Earn/Hr');
+  }
+
+  // ── Insert "Location" after "Earn/Hr" ────────────────────
+  if (headers.indexOf('Location') === -1) {
+    var ehrIdx = headers.indexOf('Earn/Hr');
+    if (ehrIdx === -1) {
+      SpreadsheetApp.getUi().alert('Cannot find "Earn/Hr" column.');
+      return;
+    }
+    var insertAt5 = ehrIdx + 2;
+    sheet.insertColumnAfter(ehrIdx + 1);
+    var cell5 = sheet.getRange(1, insertAt5);
+    cell5.setValue('Location');
+    headerStyle(cell5);
+    sheet.setColumnWidth(insertAt5, 140);
+    lastCol = sheet.getLastColumn();
+    headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    added.push('Location');
+  }
+
+  // ── Insert "Consult Rate" after "Location" ───────────────
+  if (headers.indexOf('Consult Rate') === -1) {
+    var locIdx = headers.indexOf('Location');
+    if (locIdx === -1) {
+      SpreadsheetApp.getUi().alert('Cannot find "Location" column.');
+      return;
+    }
+    var insertAt6 = locIdx + 2;
+    sheet.insertColumnAfter(locIdx + 1);
+    var cell6 = sheet.getRange(1, insertAt6);
+    cell6.setValue('Consult Rate');
+    headerStyle(cell6);
+    sheet.setColumnWidth(insertAt6, 120);
+    added.push('Consult Rate');
+  }
+
+  if (added.length === 0) {
+    SpreadsheetApp.getUi().alert('Both columns already exist — nothing to add.');
+  } else {
+    SpreadsheetApp.getUi().alert('Done! Added: ' + added.join(', ') + '\n\nExisting data has been shifted automatically — nothing was overwritten.');
+  }
 }
 
 // ── COLUMN HEADERS ───────────────────────────────────────────
@@ -21,7 +154,7 @@ function onOpen() {
 // Add columns here to expand — doPost() maps by header name automatically.
 var COMPETITOR_HEADERS = [
   'Captured Date', 'Profile URL', 'Name', 'Headline',
-  'Hourly Rate', 'Job Success Score', 'Top Rated', 'Total Earnings', 'Total Jobs',
+  'Hourly Rate', 'Job Success Score', 'Top Rated', 'Total Earnings', 'Total Hours', 'Total Jobs', 'Agency', 'Earn/Job', 'Earn/Hr', 'Location', 'Consult Rate',
   'Description',
   'Job 1 Title', 'Job 1 Earned', 'Job 1 Type', 'Job 1 Review',
   'Job 2 Title', 'Job 2 Earned', 'Job 2 Type', 'Job 2 Review',
@@ -34,6 +167,15 @@ var COMPETITOR_HEADERS = [
 
 function setupCompetitorHeaders() {
   var sheet = getOrCreateProfileSheet_();
+  // Safety check: refuse to overwrite if data rows already exist
+  if (sheet.getLastRow() > 1) {
+    SpreadsheetApp.getUi().alert(
+      'Sheet already has data.\n\n' +
+      'To add new columns without disturbing existing data, use:\n' +
+      'Competitors menu → "Add Missing Columns (run once)"'
+    );
+    return;
+  }
   var range = sheet.getRange(1, 1, 1, COMPETITOR_HEADERS.length);
   range.setValues([COMPETITOR_HEADERS]);
   range.setFontWeight('bold')
@@ -41,7 +183,7 @@ function setupCompetitorHeaders() {
     .setFontColor('#ffffff');
   sheet.setFrozenRows(1);
   // Set reasonable column widths
-  var widths = [90, 120, 120, 220, 80, 120, 100, 100, 80, 300,
+  var widths = [90, 120, 120, 220, 80, 120, 100, 100, 80, 80, 120, 80, 80, 140, 120, 300,
     180, 80, 100, 220,
     180, 80, 100, 220,
     180, 80, 100, 220,
@@ -68,7 +210,11 @@ var FIELD_MAP = {
   'jobSuccessScore':   'Job Success Score',
   'topRated':          'Top Rated',
   'totalEarnings':     'Total Earnings',
+  'totalHours':        'Total Hours',
   'totalJobs':         'Total Jobs',
+  'agencyName':        'Agency',
+  'location':          'Location',
+  'consultationRate':  'Consult Rate',
   'description':       'Description',
   'job1_title':        'Job 1 Title',
   'job1_earned':       'Job 1 Earned',
@@ -116,20 +262,90 @@ function doPost(e) {
       newRow[colIdx] = (val !== undefined && val !== null) ? String(val) : '';
     }
 
-    sheet.appendRow(newRow);
+    // ── Calculate ratios ─────────────────────────────────────
+    var earnNum  = parseEarnings_(data['totalEarnings'] || '');
+    var jobsNum  = parseInt((data['totalJobs']  || '').replace(/[^\d]/g, ''), 10) || 0;
+    var hoursNum = parseInt((data['totalHours'] || '').replace(/[^\d]/g, ''), 10) || 0;
+    var earnPerJob = (earnNum > 0 && jobsNum  > 0) ? '$' + Math.round(earnNum / jobsNum).toLocaleString()  : '';
+    var earnPerHr  = (earnNum > 0 && hoursNum > 0) ? '$' + Math.round(earnNum / hoursNum).toLocaleString() : '';
+    var earnJobCol = headers.indexOf('Earn/Job');
+    var earnHrCol  = headers.indexOf('Earn/Hr');
+    if (earnJobCol !== -1) newRow[earnJobCol] = earnPerJob;
+    if (earnHrCol  !== -1) newRow[earnHrCol]  = earnPerHr;
 
+    // ── Upsert: check if profile already exists ───────────────
+    // Match on Name + Agency (both must match to count as same profile)
+    var nameCol   = headers.indexOf('Name');
+    var agencyCol = headers.indexOf('Agency');
+    var incomingName   = String(data['name']       || '').trim().toLowerCase();
+    var incomingAgency = String(data['agencyName'] || '').trim().toLowerCase();
+
+    var existingRowNum = -1;
     var lastRow = sheet.getLastRow();
-    // Clip wrap on all cells, wrap description and review fields
-    sheet.getRange(lastRow, 1, 1, lastCol).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
-    var wrapCols = ['Description', 'Job 1 Review', 'Job 2 Review', 'Job 3 Review', 'Testimonial 1', 'Testimonial 2', 'Skills', 'Portfolio Items'];
-    wrapCols.forEach(function(colName) {
-      var ci = headers.indexOf(colName);
-      if (ci !== -1) sheet.getRange(lastRow, ci + 1).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP);
-    });
-    sheet.setRowHeight(lastRow, 80);
+    if (lastRow > 1 && nameCol !== -1) {
+      var allNames    = sheet.getRange(2, nameCol + 1, lastRow - 1, 1).getValues();
+      var allAgencies = agencyCol !== -1
+        ? sheet.getRange(2, agencyCol + 1, lastRow - 1, 1).getValues()
+        : [];
+      for (var r = 0; r < allNames.length; r++) {
+        var rowName   = String(allNames[r][0]   || '').trim().toLowerCase();
+        var rowAgency = allAgencies[r] ? String(allAgencies[r][0] || '').trim().toLowerCase() : '';
+        if (rowName === incomingName && rowAgency === incomingAgency) {
+          existingRowNum = r + 2; // 1-indexed + skip header row
+          break;
+        }
+      }
+    }
+
+    var action;
+    if (existingRowNum !== -1) {
+      // ── Profile exists: fill in only blank cells ──────────
+      // Read by header name so new/reordered columns are handled correctly
+      var existingValues = sheet.getRange(existingRowNum, 1, 1, lastCol).getValues()[0];
+
+      // Fill mapped fields (FIELD_MAP keys → header names)
+      for (var jsonKey in FIELD_MAP) {
+        var headerName = FIELD_MAP[jsonKey];
+        var colIdx = headers.indexOf(headerName);
+        if (colIdx === -1) continue; // column not in sheet yet — skip
+        if (headerName === 'Notes') continue; // manual column, never overwrite
+        var incoming = String(newRow[colIdx] || '').trim();
+        var existing = String(existingValues[colIdx] || '').trim();
+        if (incoming && !existing) {
+          sheet.getRange(existingRowNum, colIdx + 1).setValue(newRow[colIdx]);
+        }
+      }
+
+      // Fill computed ratio columns if blank
+      var ratioUpdates = {};
+      ratioUpdates['Earn/Job'] = earnPerJob;
+      ratioUpdates['Earn/Hr']  = earnPerHr;
+      for (var rk in ratioUpdates) {
+        var rIdx = headers.indexOf(rk);
+        if (rIdx === -1) continue;
+        var rExisting = String(existingValues[rIdx] || '').trim();
+        if (ratioUpdates[rk] && !rExisting) {
+          sheet.getRange(existingRowNum, rIdx + 1).setValue(ratioUpdates[rk]);
+        }
+      }
+
+      // Always refresh Captured Date + Profile URL
+      var dateCol = headers.indexOf('Captured Date');
+      var urlCol  = headers.indexOf('Profile URL');
+      if (dateCol !== -1) sheet.getRange(existingRowNum, dateCol + 1).setValue(newRow[dateCol]);
+      if (urlCol  !== -1) sheet.getRange(existingRowNum, urlCol  + 1).setValue(newRow[urlCol]);
+      action = 'updated';
+    } else {
+      // ── New profile: append row ───────────────────────────
+      sheet.appendRow(newRow);
+      var appendedRow = sheet.getLastRow();
+      sheet.getRange(appendedRow, 1, 1, lastCol).setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+      sheet.setRowHeightsForced(appendedRow, 1, 68);
+      action = 'created';
+    }
 
     return ContentService
-      .createTextOutput(JSON.stringify({ status: 'ok' }))
+      .createTextOutput(JSON.stringify({ status: 'ok', action: action }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService
@@ -139,6 +355,15 @@ function doPost(e) {
 }
 
 // ── HELPERS ──────────────────────────────────────────────────
+
+// Parse earnings string like "$1M+", "$500K+", "$50,250.00" → number
+function parseEarnings_(str) {
+  if (!str) return 0;
+  var s = str.replace(/[$,+\s]/g, '').toUpperCase();
+  if (s.indexOf('M') !== -1) return parseFloat(s) * 1000000;
+  if (s.indexOf('K') !== -1) return parseFloat(s) * 1000;
+  return parseFloat(s) || 0;
+}
 
 function getOrCreateProfileSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -220,7 +445,7 @@ function analyzeCompetitors() {
       'COMPETITOR #' + (i + 1) + ': ' + col('Name'),
       'Headline: ' + col('Headline'),
       'Rate: ' + col('Hourly Rate') + ' | JSS: ' + col('Job Success Score') + ' | Status: ' + col('Top Rated'),
-      'Earnings: ' + col('Total Earnings') + ' | Total Jobs: ' + col('Total Jobs'),
+      'Earnings: ' + col('Total Earnings') + ' | Hours: ' + col('Total Hours') + ' | Jobs: ' + col('Total Jobs') + ' | Agency: ' + col('Agency'),
       'Bio (first 400 chars): ' + col('Description').substring(0, 400),
       'Top job 1: ' + col('Job 1 Title') + ' — ' + col('Job 1 Earned') + ' (' + col('Job 1 Type') + ')',
       'Top job 2: ' + col('Job 2 Title') + ' — ' + col('Job 2 Earned') + ' (' + col('Job 2 Type') + ')',

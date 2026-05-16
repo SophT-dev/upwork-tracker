@@ -24,9 +24,9 @@ klaviyo · Facebook · shopify · "Google Ads" · Microsoft Office · Cold Calli
 |---|---|
 | Payment method verified | Yes |
 | Total spend | $2,000+ |
-| Hires | 3+ |
-| Rating | 4.5+ |
-| Hire rate | 50%+ |
+| Hires | 2+ |
+| Rating | 4.3+ |
+| Hire rate | 40%+ |
 | Avoid clients from | Asia, Africa, Israel |
 
 ---

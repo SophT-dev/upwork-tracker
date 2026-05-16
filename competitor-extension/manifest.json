@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Upwork Competitor Profiler",
+  "name": "Competitors Upwork",
   "version": "1.0",
   "description": "One-click saving of competitor Upwork profiles to Google Sheets",
   "permissions": ["activeTab", "scripting"],
